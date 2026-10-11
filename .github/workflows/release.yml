@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+
+      - name: Tes
+        run: go test ./internal/...
+
+      - name: Siapkan versi
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          NOTES="$(git tag -l --format='%(contents)' "$TAG")"
+          MANDATORY=false
+          if echo "$NOTES" | grep -qi '\[wajib\]'; then MANDATORY=true; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "mandatory=$MANDATORY" >> "$GITHUB_OUTPUT"
+          printf '%s' "$NOTES" | sed 's/\[wajib\]//Ig' > release-notes.txt
+          node -e "const f='wails.json';const c=require('./'+f);c.info.productVersion='$VERSION';require('fs').writeFileSync(f,JSON.stringify(c,null,2)+'\n')"
+
+      - name: Build
+        run: |
+          MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
+          wails build -platform windows/amd64 -nsis -clean \
+            -ldflags "-X main.appVersion=${{ steps.meta.outputs.version }} -X tiket/internal/updater.ManifestURL=${MANIFEST_URL}"
+
+      - name: Tanda tangani & buat latest.json
+        env:
+          TIKET_SIGNING_KEY: ${{ secrets.TIKET_SIGNING_KEY }}
+        run: |
+          go run ./cmd/tiket-release manifest \
+            -file build/bin/tiket.exe \
+            -version "${{ steps.meta.outputs.tag }}" \
+            -url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.meta.outputs.tag }}/tiket.exe" \
+            -notes "$(cat release-notes.txt)" \
+            -mandatory=${{ steps.meta.outputs.mandatory }} \
+            -out build/bin/latest.json
+
+      - name: Terbitkan rilis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            build/bin/tiket.exe \
+            build/bin/*-installer.exe \
+            build/bin/latest.json \
+            --title "${{ steps.meta.outputs.tag }}" \
+            --notes-file release-notes.txt

@@ -1,0 +1,46 @@
+package store
+
+import (
+	"database/sql"
+	"errors"
+	"strings"
+	"time"
+
+	"tiket/internal/model"
+)
+
+const timeLayout = "2006-01-02 15:04:05"
+
+type Store struct {
+	DB  *sql.DB
+	Now func() time.Time
+}
+
+func New(conn *sql.DB) *Store {
+	return &Store{DB: conn, Now: time.Now}
+}
+
+func (s *Store) now() string {
+	return s.Now().Format(timeLayout)
+}
+
+func notFound(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ErrNotFound
+	}
+	return err
+}
+
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func likePattern(search string) string {
+	return "%" + likeEscaper.Replace(strings.TrimSpace(search)) + "%"
+}
+
+func likePrefix(prefix string) string {
+	return likeEscaper.Replace(prefix) + "%"
+}
