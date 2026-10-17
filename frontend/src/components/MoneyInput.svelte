@@ -17,30 +17,41 @@
     onenter?: () => void
   } = $props()
 
-  const initial = value != null ? formatMoney(value) : ''
-  let text = $state(initial)
-  let invalid = $derived(text.trim() !== '' && parseMoney(text) === null)
+  // The input's text is owned by this component and written straight to the DOM:
+  // no reactive `value` attribute, and the DOM is only touched when the formatted
+  // text or caret actually differs from what the browser already shows.
   let el: HTMLInputElement
-  let previous = initial
+  let previous = value != null ? formatMoney(value) : ''
+  let invalid = $state(false)
 
   $effect(() => {
-    if (autofocus) el?.focus()
+    el.value = previous
+    if (autofocus) el.focus()
   })
 
+  function commit(text: string) {
+    previous = text
+    const parsed = text === '' ? null : parseMoney(text)
+    invalid = text !== '' && parsed === null
+    if (parsed !== value) value = parsed
+  }
+
   export function set(sen: number) {
-    value = sen
-    text = previous = formatMoney(sen)
+    const text = formatMoney(sen)
+    if (el.value !== text) el.value = text
+    commit(text)
   }
 
   function apply(raw: string, caret: number) {
     const r = formatTyping(raw, caret)
-    text = previous = el.value = r.text
-    el.setSelectionRange(r.caret, r.caret)
-    value = r.text === '' ? null : parseMoney(r.text)
+    if (el.value !== r.text) el.value = r.text
+    if (el.selectionStart !== r.caret || el.selectionEnd !== r.caret) el.setSelectionRange(r.caret, r.caret)
+    commit(r.text)
   }
 
   function oninput(e: Event) {
     const ev = e as InputEvent
+    if (ev.isComposing) return
     let raw = el.value
     let caret = el.selectionStart ?? raw.length
 
@@ -65,10 +76,14 @@
     apply(raw, caret)
   }
 
+  function oncompositionend() {
+    apply(el.value, el.selectionStart ?? el.value.length)
+  }
+
   function onblur() {
-    if (text.endsWith(',')) {
-      text = previous = text.slice(0, -1)
-      value = text === '' ? null : parseMoney(text)
+    if (previous.endsWith(',')) {
+      el.value = previous.slice(0, -1)
+      commit(el.value)
     }
   }
 
@@ -85,9 +100,11 @@
     class="input text-right {large ? 'py-3 pl-12 text-2xl font-semibold' : 'pl-10'} {invalid ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ''}"
     inputmode="decimal"
     autocomplete="off"
+    autocorrect="off"
+    spellcheck="false"
     {placeholder}
-    value={text}
     {oninput}
+    {oncompositionend}
     {onblur}
     {onkeydown}
   />

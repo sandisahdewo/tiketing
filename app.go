@@ -16,10 +16,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/browser"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"tiket/internal/config"
 	"tiket/internal/db"
+	"tiket/internal/export"
 	"tiket/internal/model"
 	"tiket/internal/printer"
 	"tiket/internal/receipt"
@@ -454,6 +456,66 @@ func (a *App) Report(q model.ReportQuery) (model.Report, error) {
 	}
 	out, err := svc.Report(token, q)
 	return out, a.check(err)
+}
+
+// ExportReport saves the report as "pdf" or "xlsx" through a save dialog and
+// opens the file. It returns the saved path, or "" when the dialog was cancelled.
+func (a *App) ExportReport(q model.ReportQuery, format string) (string, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return "", err
+	}
+	report, err := svc.Report(token, q)
+	if err != nil {
+		return "", a.check(err)
+	}
+	sales, err := svc.ListSales(token, model.SaleQuery{From: q.From, To: q.To})
+	if err != nil {
+		return "", a.check(err)
+	}
+	settings, err := svc.GetSettings(token)
+	if err != nil {
+		return "", a.check(err)
+	}
+	data := export.Data{Settings: settings, Report: report, Sales: sales, PrintedAt: time.Now()}
+	if u := a.CurrentUser(); u != nil {
+		data.PrintedBy = u.FullName
+	}
+
+	var body []byte
+	var filter wruntime.FileFilter
+	switch format {
+	case "pdf":
+		body, err = export.PDF(data)
+		filter = wruntime.FileFilter{DisplayName: "PDF (*.pdf)", Pattern: "*.pdf"}
+	case "xlsx":
+		body, err = export.Excel(data)
+		filter = wruntime.FileFilter{DisplayName: "Excel (*.xlsx)", Pattern: "*.xlsx"}
+	default:
+		return "", model.Invalid("Format laporan tidak valid")
+	}
+	if err != nil {
+		return "", err
+	}
+
+	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title:           "Simpan Laporan",
+		DefaultFilename: export.FileName(report, format),
+		Filters:         []wruntime.FileFilter{filter},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if !strings.EqualFold(filepath.Ext(path), "."+format) {
+		path += "." + format
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return "", fmt.Errorf("gagal menyimpan laporan: %w", err)
+	}
+	if err := browser.OpenFile(path); err != nil {
+		log.Printf("open %s: %v", path, err)
+	}
+	return path, nil
 }
 
 func (a *App) GetSettings() (model.Settings, error) {

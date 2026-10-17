@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -139,10 +140,22 @@ func (l *Local) SaveTicket(token string, in model.TicketInput) (model.Ticket, er
 	if in.Price < 0 || in.Price > maxPrice {
 		return model.Ticket{}, model.Invalid("Harga tidak valid")
 	}
-	if in.ID == 0 {
-		return l.Store.CreateTicket(in.Name, in.Price)
+	if in.Category == "" {
+		in.Category = model.CategoryTicket
 	}
-	return l.Store.UpdateTicket(in.ID, in.Name, in.Price)
+	if in.Category != model.CategoryTicket && in.Category != model.CategoryTopup {
+		return model.Ticket{}, model.Invalid("Kategori tidak valid")
+	}
+	if in.Color == "" {
+		in.Color = model.DefaultColor
+	}
+	if !slices.Contains(model.TicketColors, in.Color) {
+		return model.Ticket{}, model.Invalid("Warna tidak valid")
+	}
+	if in.ID == 0 {
+		return l.Store.CreateTicket(in)
+	}
+	return l.Store.UpdateTicket(in)
 }
 
 func (l *Local) DeleteTicket(token string, id int64) error {

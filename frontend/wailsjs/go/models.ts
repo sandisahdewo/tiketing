@@ -78,6 +78,7 @@ export namespace model {
 	export class ReportTicketRow {
 	    ticketId: number;
 	    ticketName: string;
+	    category: string;
 	    qty: number;
 	    total: number;
 	
@@ -89,6 +90,7 @@ export namespace model {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ticketId = source["ticketId"];
 	        this.ticketName = source["ticketName"];
+	        this.category = source["category"];
 	        this.qty = source["qty"];
 	        this.total = source["total"];
 	    }
@@ -98,6 +100,10 @@ export namespace model {
 	    transactions: number;
 	    qty: number;
 	    total: number;
+	    ticketQty: number;
+	    ticketTotal: number;
+	    topupQty: number;
+	    topupTotal: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportRow(source);
@@ -109,6 +115,10 @@ export namespace model {
 	        this.transactions = source["transactions"];
 	        this.qty = source["qty"];
 	        this.total = source["total"];
+	        this.ticketQty = source["ticketQty"];
+	        this.ticketTotal = source["ticketTotal"];
+	        this.topupQty = source["topupQty"];
+	        this.topupTotal = source["topupTotal"];
 	    }
 	}
 	export class Report {
@@ -120,6 +130,10 @@ export namespace model {
 	    transactions: number;
 	    qty: number;
 	    total: number;
+	    ticketQty: number;
+	    ticketTotal: number;
+	    topupQty: number;
+	    topupTotal: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Report(source);
@@ -135,6 +149,10 @@ export namespace model {
 	        this.transactions = source["transactions"];
 	        this.qty = source["qty"];
 	        this.total = source["total"];
+	        this.ticketQty = source["ticketQty"];
+	        this.ticketTotal = source["ticketTotal"];
+	        this.topupQty = source["topupQty"];
+	        this.topupTotal = source["topupTotal"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -177,6 +195,7 @@ export namespace model {
 	    id: number;
 	    ticketId: number;
 	    ticketName: string;
+	    category: string;
 	    price: number;
 	    qty: number;
 	    subtotal: number;
@@ -190,6 +209,7 @@ export namespace model {
 	        this.id = source["id"];
 	        this.ticketId = source["ticketId"];
 	        this.ticketName = source["ticketName"];
+	        this.category = source["category"];
 	        this.price = source["price"];
 	        this.qty = source["qty"];
 	        this.subtotal = source["subtotal"];
@@ -316,6 +336,8 @@ export namespace model {
 	    id: number;
 	    name: string;
 	    price: number;
+	    category: string;
+	    color: string;
 	    createdAt: string;
 	    updatedAt: string;
 	    deletedAt?: string;
@@ -329,6 +351,8 @@ export namespace model {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.price = source["price"];
+	        this.category = source["category"];
+	        this.color = source["color"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	        this.deletedAt = source["deletedAt"];
@@ -338,6 +362,8 @@ export namespace model {
 	    id: number;
 	    name: string;
 	    price: number;
+	    category: string;
+	    color: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TicketInput(source);
@@ -348,6 +374,8 @@ export namespace model {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.price = source["price"];
+	        this.category = source["category"];
+	        this.color = source["color"];
 	    }
 	}
 	export class User {

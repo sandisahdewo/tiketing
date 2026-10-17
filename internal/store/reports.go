@@ -28,8 +28,14 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 	}
 
 	rows, err := s.DB.Query(
-		`SELECT `+expr+` AS period, COUNT(DISTINCT s.id), SUM(i.qty), SUM(i.subtotal)
-		 FROM sales s JOIN sale_items i ON i.sale_id = s.id
+		`SELECT `+expr+` AS period, COUNT(DISTINCT s.id), SUM(i.qty), SUM(i.subtotal),
+		        TOTAL(CASE WHEN t.category = 'ticket' THEN i.qty END),
+		        TOTAL(CASE WHEN t.category = 'ticket' THEN i.subtotal END),
+		        TOTAL(CASE WHEN t.category = 'topup' THEN i.qty END),
+		        TOTAL(CASE WHEN t.category = 'topup' THEN i.subtotal END)
+		 FROM sales s
+		 JOIN sale_items i ON i.sale_id = s.id
+		 JOIN tickets t ON t.id = i.ticket_id
 		 WHERE s.created_at >= ? AND s.created_at < ?
 		 GROUP BY period ORDER BY period`,
 		start, end,
@@ -40,25 +46,32 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var r model.ReportRow
-		if err := rows.Scan(&r.Period, &r.Transactions, &r.Qty, &r.Total); err != nil {
+		var ticketQty, ticketTotal, topupQty, topupTotal float64
+		if err := rows.Scan(&r.Period, &r.Transactions, &r.Qty, &r.Total, &ticketQty, &ticketTotal, &topupQty, &topupTotal); err != nil {
 			return report, err
 		}
+		r.TicketQty, r.TicketTotal = int64(ticketQty), int64(ticketTotal)
+		r.TopupQty, r.TopupTotal = int64(topupQty), int64(topupTotal)
 		report.Rows = append(report.Rows, r)
 		report.Transactions += r.Transactions
 		report.Qty += r.Qty
 		report.Total += r.Total
+		report.TicketQty += r.TicketQty
+		report.TicketTotal += r.TicketTotal
+		report.TopupQty += r.TopupQty
+		report.TopupTotal += r.TopupTotal
 	}
 	if err := rows.Err(); err != nil {
 		return report, err
 	}
 
 	trows, err := s.DB.Query(
-		`SELECT t.id, t.name, SUM(i.qty), SUM(i.subtotal)
+		`SELECT t.id, t.name, t.category, SUM(i.qty), SUM(i.subtotal)
 		 FROM sales s
 		 JOIN sale_items i ON i.sale_id = s.id
 		 JOIN tickets t ON t.id = i.ticket_id
 		 WHERE s.created_at >= ? AND s.created_at < ?
-		 GROUP BY t.id, t.name ORDER BY SUM(i.subtotal) DESC, t.name`,
+		 GROUP BY t.id, t.name, t.category ORDER BY t.category, SUM(i.subtotal) DESC, t.name`,
 		start, end,
 	)
 	if err != nil {
@@ -67,7 +80,7 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 	defer trows.Close()
 	for trows.Next() {
 		var r model.ReportTicketRow
-		if err := trows.Scan(&r.TicketID, &r.TicketName, &r.Qty, &r.Total); err != nil {
+		if err := trows.Scan(&r.TicketID, &r.TicketName, &r.Category, &r.Qty, &r.Total); err != nil {
 			return report, err
 		}
 		report.Tickets = append(report.Tickets, r)

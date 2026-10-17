@@ -4,6 +4,7 @@
   import ReceiptModal from '../components/ReceiptModal.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
+  import { colorClass } from '../lib/colors'
 
   type CartItem = { ticket: model.Ticket; qty: number }
 
@@ -21,6 +22,12 @@
     const q = search.trim().toLowerCase()
     return q ? tickets.filter((t) => t.name.toLowerCase().includes(q)) : tickets
   })
+  let sections = $derived(
+    [
+      { title: 'Daftar Tiket', items: filtered.filter((t) => t.category !== 'topup') },
+      { title: 'Topup Card', items: filtered.filter((t) => t.category === 'topup') }
+    ].filter((s) => s.items.length > 0)
+  )
   let total = $derived(cart.reduce((sum, c) => sum + c.ticket.price * c.qty, 0))
   let totalQty = $derived(cart.reduce((sum, c) => sum + c.qty, 0))
 
@@ -115,24 +122,26 @@
       </button>
     </div>
 
-    <h2 class="mt-4 mb-2 font-semibold text-brand-700">Daftar Tiket</h2>
-    <div class="card min-h-0 flex-1 overflow-y-auto p-3">
+    <div class="card mt-4 min-h-0 flex-1 overflow-y-auto p-3">
       {#if loading}
         <p class="py-10 text-center text-slate-500">Memuat tiket…</p>
       {:else if filtered.length === 0}
         <p class="py-10 text-center text-slate-500">{tickets.length === 0 ? 'Belum ada tiket. Admin bisa menambah tiket di menu Tiket.' : 'Tiket tidak ditemukan.'}</p>
       {:else}
-        <div class="grid grid-cols-3 gap-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {#each filtered as t (t.id)}
-            <button
-              class="flex min-h-24 flex-col items-center justify-center rounded-md bg-amber-500 px-3 py-4 text-center text-white shadow-sm transition hover:bg-amber-600 active:scale-[0.98]"
-              onclick={() => add(t)}
-            >
-              <span class="font-semibold break-words uppercase">{t.name}</span>
-              <span class="mt-1 text-sm opacity-90">({formatMoney(t.price)})</span>
-            </button>
-          {/each}
-        </div>
+        {#each sections as section, i (section.title)}
+          <h2 class="mb-2 font-semibold text-brand-700 {i > 0 ? 'mt-5' : ''}">{section.title}</h2>
+          <div class="grid grid-cols-3 gap-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {#each section.items as t (t.id)}
+              <button
+                class="flex min-h-24 flex-col items-center justify-center rounded-md px-3 py-4 text-center text-white shadow-sm transition active:scale-[0.98] {colorClass(t.color)}"
+                onclick={() => add(t)}
+              >
+                <span class="font-semibold break-words uppercase">{t.name}</span>
+                <span class="mt-1 text-sm opacity-90">({formatMoney(t.price)})</span>
+              </button>
+            {/each}
+          </div>
+        {/each}
       {/if}
     </div>
   </section>
@@ -161,7 +170,7 @@
                 <div class="flex items-center">
                   <button class="h-8 w-8 rounded-l-md border border-slate-300 text-lg hover:bg-slate-50" onclick={() => setQty(item, item.qty - 1)}>−</button>
                   <input
-                    class="h-8 w-16 border-y border-slate-300 text-center text-sm outline-none"
+                    class="h-8 w-16 [appearance:textfield] border-y border-slate-300 text-center text-sm outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     type="number"
                     min="1"
                     value={item.qty}
@@ -180,7 +189,7 @@
     <div class="border-t border-slate-200 p-4">
       <div class="flex items-end justify-between">
         <div>
-          <div class="text-sm text-slate-500">Total ({totalQty} tiket)</div>
+          <div class="text-sm text-slate-500">Total ({totalQty} item)</div>
           <div class="text-3xl font-bold text-brand-700">{formatRp(total)}</div>
         </div>
       </div>

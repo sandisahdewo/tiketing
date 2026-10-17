@@ -7,6 +7,14 @@ const (
 	RoleKasir = "kasir"
 )
 
+const (
+	CategoryTicket = "ticket"
+	CategoryTopup  = "topup"
+	DefaultColor   = "orange"
+)
+
+var TicketColors = []string{"orange", "yellow", "red", "rose", "pink", "purple", "indigo", "blue", "sky", "teal", "emerald", "lime", "slate"}
+
 var (
 	ErrUnauthorized    = errors.New("Sesi berakhir, silakan login kembali")
 	ErrForbidden       = errors.New("Anda tidak punya akses untuk fitur ini")
@@ -30,15 +38,19 @@ type Ticket struct {
 	ID        int64   `json:"id"`
 	Name      string  `json:"name"`
 	Price     int64   `json:"price"`
+	Category  string  `json:"category"`
+	Color     string  `json:"color"`
 	CreatedAt string  `json:"createdAt"`
 	UpdatedAt string  `json:"updatedAt"`
 	DeletedAt *string `json:"deletedAt"`
 }
 
 type TicketInput struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Price int64  `json:"price"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Price    int64  `json:"price"`
+	Category string `json:"category"`
+	Color    string `json:"color"`
 }
 
 type User struct {
@@ -79,6 +91,7 @@ type SaleItem struct {
 	ID         int64  `json:"id"`
 	TicketID   int64  `json:"ticketId"`
 	TicketName string `json:"ticketName"`
+	Category   string `json:"category"`
 	Price      int64  `json:"price"`
 	Qty        int64  `json:"qty"`
 	Subtotal   int64  `json:"subtotal"`
@@ -114,11 +127,16 @@ type ReportRow struct {
 	Transactions int64  `json:"transactions"`
 	Qty          int64  `json:"qty"`
 	Total        int64  `json:"total"`
+	TicketQty    int64  `json:"ticketQty"`
+	TicketTotal  int64  `json:"ticketTotal"`
+	TopupQty     int64  `json:"topupQty"`
+	TopupTotal   int64  `json:"topupTotal"`
 }
 
 type ReportTicketRow struct {
 	TicketID   int64  `json:"ticketId"`
 	TicketName string `json:"ticketName"`
+	Category   string `json:"category"`
 	Qty        int64  `json:"qty"`
 	Total      int64  `json:"total"`
 }
@@ -132,6 +150,10 @@ type Report struct {
 	Transactions int64             `json:"transactions"`
 	Qty          int64             `json:"qty"`
 	Total        int64             `json:"total"`
+	TicketQty    int64             `json:"ticketQty"`
+	TicketTotal  int64             `json:"ticketTotal"`
+	TopupQty     int64             `json:"topupQty"`
+	TopupTotal   int64             `json:"topupTotal"`
 }
 
 type Settings struct {

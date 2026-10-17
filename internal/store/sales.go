@@ -113,7 +113,7 @@ func (s *Store) GetSale(id int64) (model.Sale, error) {
 		return sale, notFound(err)
 	}
 	rows, err := s.DB.Query(
-		`SELECT i.id, i.ticket_id, t.name, i.price, i.qty, i.subtotal
+		`SELECT i.id, i.ticket_id, t.name, t.category, i.price, i.qty, i.subtotal
 		 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id
 		 WHERE i.sale_id = ? ORDER BY i.id`, id,
 	)
@@ -123,7 +123,7 @@ func (s *Store) GetSale(id int64) (model.Sale, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var it model.SaleItem
-		if err := rows.Scan(&it.ID, &it.TicketID, &it.TicketName, &it.Price, &it.Qty, &it.Subtotal); err != nil {
+		if err := rows.Scan(&it.ID, &it.TicketID, &it.TicketName, &it.Category, &it.Price, &it.Qty, &it.Subtotal); err != nil {
 			return sale, err
 		}
 		sale.Items = append(sale.Items, it)

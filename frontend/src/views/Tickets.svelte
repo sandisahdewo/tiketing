@@ -2,16 +2,20 @@
   import Modal from '../components/Modal.svelte'
   import MoneyInput from '../components/MoneyInput.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
-  import { formatRp } from '../lib/money'
+  import { formatMoney, formatRp } from '../lib/money'
+  import { categories, categoryLabel, colors, colorClass } from '../lib/colors'
   import { formatDateTime } from '../lib/date'
   import { toast } from '../lib/toast.svelte'
 
   let tickets = $state<model.Ticket[]>([])
   let search = $state('')
   let showDeleted = $state(false)
+  let category = $state('')
   let loading = $state(true)
 
-  let editing = $state<{ id: number; name: string; price: number | null } | null>(null)
+  let visible = $derived(category ? tickets.filter((t) => t.category === category) : tickets)
+
+  let editing = $state<{ id: number; name: string; price: number | null; category: string; color: string } | null>(null)
   let formError = $state('')
   let saving = $state(false)
   let confirmDelete = $state<model.Ticket | null>(null)
@@ -36,7 +40,9 @@
 
   function openForm(t?: model.Ticket) {
     formError = ''
-    editing = t ? { id: t.id, name: t.name, price: t.price } : { id: 0, name: '', price: null }
+    editing = t
+      ? { id: t.id, name: t.name, price: t.price, category: t.category, color: t.color }
+      : { id: 0, name: '', price: null, category: category || 'ticket', color: 'orange' }
   }
 
   async function save(e: SubmitEvent) {
@@ -49,7 +55,7 @@
     saving = true
     formError = ''
     try {
-      await App.SaveTicket(model.TicketInput.createFrom({ id: editing.id, name: editing.name, price: editing.price }))
+      await App.SaveTicket(model.TicketInput.createFrom({ id: editing.id, name: editing.name, price: editing.price, category: editing.category, color: editing.color }))
       toast(editing.id ? 'Tiket diperbarui' : 'Tiket ditambahkan')
       editing = null
       load()
@@ -95,6 +101,11 @@
       <button class="rounded px-3 py-1.5 {!showDeleted ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (showDeleted = false)}>Aktif</button>
       <button class="rounded px-3 py-1.5 {showDeleted ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (showDeleted = true)}>Terhapus</button>
     </div>
+    <div class="flex rounded-md border border-slate-300 bg-white p-0.5 text-sm">
+      {#each [{ value: '', label: 'Semua' }, ...categories] as c}
+        <button class="rounded px-3 py-1.5 {category === c.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (category = c.value)}>{c.label}</button>
+      {/each}
+    </div>
   </div>
 
   <div class="card mt-4 min-h-0 flex-1 overflow-y-auto">
@@ -102,6 +113,7 @@
       <thead class="sticky top-0">
         <tr>
           <th>Nama</th>
+          <th>Kategori</th>
           <th class="text-right">Harga</th>
           <th>Dibuat</th>
           <th>Diubah</th>
@@ -111,13 +123,16 @@
       </thead>
       <tbody>
         {#if loading && tickets.length === 0}
-          <tr><td colspan="6" class="py-10 text-center text-slate-500">Memuat…</td></tr>
-        {:else if tickets.length === 0}
-          <tr><td colspan="6" class="py-10 text-center text-slate-500">{showDeleted ? 'Tidak ada tiket terhapus.' : 'Belum ada tiket.'}</td></tr>
+          <tr><td colspan="7" class="py-10 text-center text-slate-500">Memuat…</td></tr>
+        {:else if visible.length === 0}
+          <tr><td colspan="7" class="py-10 text-center text-slate-500">{showDeleted ? 'Tidak ada tiket terhapus.' : 'Belum ada tiket.'}</td></tr>
         {/if}
-        {#each tickets as t (t.id)}
+        {#each visible as t (t.id)}
           <tr class="hover:bg-slate-50">
-            <td class="font-medium">{t.name}</td>
+            <td class="font-medium">
+              <span class="inline-flex items-center gap-2"><span class="h-3.5 w-3.5 shrink-0 rounded-sm {colorClass(t.color)}"></span>{t.name}</span>
+            </td>
+            <td>{categoryLabel(t.category)}</td>
             <td class="text-right">{formatRp(t.price)}</td>
             <td class="text-slate-500">{formatDateTime(t.createdAt)}</td>
             <td class="text-slate-500">{formatDateTime(t.updatedAt)}</td>
@@ -148,6 +163,32 @@
         <label class="label" for="price">Harga</label>
         <MoneyInput id="price" bind:value={editing.price} />
         <p class="mt-1 text-xs text-slate-500">Boleh pecahan, contoh 12.500,50</p>
+      </div>
+      <div>
+        <span class="label">Kategori</span>
+        <div class="flex w-fit rounded-md border border-slate-300 bg-white p-0.5 text-sm">
+          {#each categories as c}
+            <button type="button" class="rounded px-4 py-1.5 {editing.category === c.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => editing && (editing.category = c.value)}>{c.label}</button>
+          {/each}
+        </div>
+      </div>
+      <div>
+        <span class="label">Warna</span>
+        <div class="flex flex-wrap gap-2">
+          {#each colors as c}
+            <button
+              type="button"
+              class="h-8 w-8 rounded-md {c.bg} {editing.color === c.value ? 'ring-2 ring-slate-800 ring-offset-2' : ''}"
+              title={c.label}
+              aria-label={c.label}
+              onclick={() => editing && (editing.color = c.value)}
+            ></button>
+          {/each}
+        </div>
+        <div class="mt-3 flex min-h-24 w-40 flex-col items-center justify-center rounded-md px-3 py-4 text-center text-white shadow-sm {colorClass(editing.color)}">
+          <span class="font-semibold break-words uppercase">{editing.name || 'Nama tiket'}</span>
+          <span class="mt-1 text-sm opacity-90">({formatMoney(editing.price ?? 0)})</span>
+        </div>
       </div>
       {#if formError}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>{/if}
     </form>

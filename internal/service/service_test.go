@@ -335,3 +335,51 @@ func TestRemoteUnreachable(t *testing.T) {
 		t.Fatal("expected connection error")
 	}
 }
+
+func TestTopupCategory(t *testing.T) {
+	svc, _ := newLocal(t)
+	admin, kasir := setup(t, svc)
+
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry Weekday", Price: 3500000}))
+	if entry.Category != model.CategoryTicket || entry.Color != model.DefaultColor {
+		t.Errorf("defaults wrong: %+v", entry)
+	}
+	topup50 := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 50.000", Price: 5000000, Category: model.CategoryTopup, Color: "emerald"}))
+	topup100 := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 100.000", Price: 10000000, Category: model.CategoryTopup, Color: "blue"}))
+	if topup50.Category != model.CategoryTopup || topup50.Color != "emerald" {
+		t.Errorf("topup saved wrong: %+v", topup50)
+	}
+	if _, err := svc.SaveTicket(admin, model.TicketInput{Name: "X", Price: 1, Category: "voucher"}); err == nil {
+		t.Error("invalid category accepted")
+	}
+	if _, err := svc.SaveTicket(admin, model.TicketInput{Name: "X", Price: 1, Color: "#ff0000"}); err == nil {
+		t.Error("invalid color accepted")
+	}
+	entry = must(svc.SaveTicket(admin, model.TicketInput{ID: entry.ID, Name: entry.Name, Price: entry.Price, Color: "red"}))
+	if entry.Color != "red" || entry.Category != model.CategoryTicket {
+		t.Errorf("update wrong: %+v", entry)
+	}
+
+	sale := must(svc.CreateSale(kasir, model.SaleInput{
+		Items: []model.SaleItemInput{
+			{TicketID: entry.ID, Qty: 2},
+			{TicketID: topup100.ID, Qty: 1},
+			{TicketID: topup50.ID, Qty: 2},
+		},
+		Paid: 30000000,
+	}))
+	if sale.Total != 2*3500000+10000000+2*5000000 || sale.Items[1].Category != model.CategoryTopup {
+		t.Errorf("mixed sale wrong: %+v", sale)
+	}
+
+	r := must(svc.Report(admin, model.ReportQuery{Period: "daily", From: "2026-10-01", To: "2026-10-31"}))
+	if r.TicketQty != 2 || r.TicketTotal != 7000000 || r.TopupQty != 3 || r.TopupTotal != 20000000 || r.Total != sale.Total {
+		t.Errorf("report totals wrong: %+v", r)
+	}
+	if len(r.Rows) != 1 || r.Rows[0].TicketTotal != 7000000 || r.Rows[0].TopupTotal != 20000000 {
+		t.Errorf("report rows wrong: %+v", r.Rows)
+	}
+	if len(r.Tickets) != 3 || r.Tickets[0].Category != model.CategoryTicket || r.Tickets[1].TicketID != topup100.ID {
+		t.Errorf("report items wrong: %+v", r.Tickets)
+	}
+}

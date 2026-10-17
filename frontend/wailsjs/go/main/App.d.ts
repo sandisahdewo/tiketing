@@ -20,6 +20,8 @@ export function DeleteTicket(arg1:number):Promise<void>;
 
 export function DeleteUser(arg1:number):Promise<void>;
 
+export function ExportReport(arg1:model.ReportQuery,arg2:string):Promise<string>;
+
 export function GetAppInfo():Promise<main.AppInfo>;
 
 export function GetSale(arg1:number):Promise<model.Sale>;

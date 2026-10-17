@@ -6,12 +6,12 @@ import (
 	"tiket/internal/model"
 )
 
-const ticketColumns = "id, name, price, created_at, updated_at, deleted_at"
+const ticketColumns = "id, name, price, category, color, created_at, updated_at, deleted_at"
 
 func scanTicket(row interface{ Scan(...any) error }) (model.Ticket, error) {
 	var t model.Ticket
 	var deleted sql.NullString
-	err := row.Scan(&t.ID, &t.Name, &t.Price, &t.CreatedAt, &t.UpdatedAt, &deleted)
+	err := row.Scan(&t.ID, &t.Name, &t.Price, &t.Category, &t.Color, &t.CreatedAt, &t.UpdatedAt, &deleted)
 	if deleted.Valid {
 		t.DeletedAt = &deleted.String
 	}
@@ -24,7 +24,7 @@ func (s *Store) ListTickets(search string, deleted bool) ([]model.Ticket, error)
 		cond = "deleted_at IS NOT NULL"
 	}
 	rows, err := s.DB.Query(
-		"SELECT "+ticketColumns+" FROM tickets WHERE "+cond+` AND name LIKE ? ESCAPE '\' ORDER BY name`,
+		"SELECT "+ticketColumns+" FROM tickets WHERE "+cond+` AND name LIKE ? ESCAPE '\' ORDER BY category, name`,
 		likePattern(search),
 	)
 	if err != nil {
@@ -47,11 +47,11 @@ func (s *Store) GetTicket(id int64) (model.Ticket, error) {
 	return t, notFound(err)
 }
 
-func (s *Store) CreateTicket(name string, price int64) (model.Ticket, error) {
+func (s *Store) CreateTicket(in model.TicketInput) (model.Ticket, error) {
 	now := s.now()
 	res, err := s.DB.Exec(
-		"INSERT INTO tickets (name, price, created_at, updated_at) VALUES (?, ?, ?, ?)",
-		name, price, now, now,
+		"INSERT INTO tickets (name, price, category, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		in.Name, in.Price, in.Category, in.Color, now, now,
 	)
 	if err != nil {
 		return model.Ticket{}, err
@@ -60,15 +60,15 @@ func (s *Store) CreateTicket(name string, price int64) (model.Ticket, error) {
 	return s.GetTicket(id)
 }
 
-func (s *Store) UpdateTicket(id int64, name string, price int64) (model.Ticket, error) {
+func (s *Store) UpdateTicket(in model.TicketInput) (model.Ticket, error) {
 	res, err := s.DB.Exec(
-		"UPDATE tickets SET name = ?, price = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-		name, price, s.now(), id,
+		"UPDATE tickets SET name = ?, price = ?, category = ?, color = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+		in.Name, in.Price, in.Category, in.Color, s.now(), in.ID,
 	)
 	if err := affected(res, err); err != nil {
 		return model.Ticket{}, err
 	}
-	return s.GetTicket(id)
+	return s.GetTicket(in.ID)
 }
 
 func (s *Store) DeleteTicket(id int64) error {
