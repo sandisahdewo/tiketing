@@ -23,11 +23,14 @@
   ]
 
   let view = $state<View>('pos')
-  // Set when the cashier screen opens Laporan on today's transactions.
+  // Set when the cashier screen opens Laporan on today's transactions, and
+  // the sale to put on top when it opens it from a finished payment.
   let reportsToday = $state(false)
+  let reportsSale = $state<number | null>(null)
 
-  function show(v: View, today = false) {
+  function show(v: View, today = false, sale: number | null = null) {
     reportsToday = today
+    reportsSale = sale
     view = v
   }
   let now = $state(new Date())
@@ -82,13 +85,13 @@
 
   <main class="min-h-0 flex-1">
     {#if view === 'pos'}
-      <Pos onhistory={() => show('reports', true)} />
+      <Pos onhistory={() => show('reports', true)} onshowsale={(id) => show('reports', true, id)} />
     {:else if view === 'tickets'}
       <Tickets />
     {:else if view === 'users'}
       <Users />
     {:else if view === 'reports'}
-      <Reports todaySales={reportsToday} />
+      <Reports todaySales={reportsToday} highlightSale={reportsSale} />
     {:else}
       <Settings {onreset} />
     {/if}

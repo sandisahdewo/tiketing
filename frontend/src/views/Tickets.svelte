@@ -46,6 +46,18 @@
   // A delete, (de)activation or restore is in progress; blocks repeat clicks.
   let busy = $state(false)
 
+  // The ticket just added or edited: shown on this page (at the top when it
+  // is not already here) and blinked green, if it fits the status/category filter.
+  let saved: { ticket: model.Ticket; isNew: boolean } | null = null
+  let flash = $state<number | null>(null)
+
+  function fitsFilter(t: model.Ticket) {
+    if (status === 'deleted') return false
+    if (status === 'active' && !t.active) return false
+    if (status === 'inactive' && t.active) return false
+    return !category || t.category === category
+  }
+
   // Filters, search and paging run on the server.
   async function load() {
     const seq = ++requestSeq
@@ -58,6 +70,14 @@
         page = Math.ceil(out.count / pageSize)
         return load()
       }
+      if (saved && fitsFilter(saved.ticket)) {
+        const t = saved.ticket
+        const onPage = out.tickets.some((x) => x.id === t.id)
+        if (saved.isNew || !onPage) out.tickets = [t, ...out.tickets.filter((x) => x.id !== t.id)]
+        flash = t.id
+        setTimeout(() => (flash = null), 2000)
+      }
+      saved = null
       result = out
     } catch (e) {
       if (seq === requestSeq) handleError(e)
@@ -100,8 +120,9 @@
     if (!editing || saving || !form.check()) return
     saving = true
     try {
-      await App.SaveTicket(model.TicketInput.createFrom({ id: editing.id, name: editing.name, price: editing.price, category: editing.category, color: editing.color }))
+      const ticket = await App.SaveTicket(model.TicketInput.createFrom({ id: editing.id, name: editing.name, price: editing.price, category: editing.category, color: editing.color }))
       toast(editing.id ? 'Tiket diperbarui' : 'Tiket ditambahkan')
+      saved = { ticket, isNew: !editing.id }
       editing = null
       load()
     } catch (e) {
@@ -197,7 +218,7 @@
           <tr><td colspan="7" class="py-10 text-center text-slate-500">{appliedSearch || category ? 'Tiket tidak ditemukan.' : showDeleted ? 'Tidak ada tiket terhapus.' : status === 'inactive' ? 'Tidak ada tiket non-aktif.' : status === 'active' ? 'Tidak ada tiket aktif.' : 'Belum ada tiket.'}</td></tr>
         {/if}
         {#each tickets as t (t.id)}
-          <tr class="hover:bg-slate-50 {!showDeleted && !t.active ? 'text-slate-400' : ''}">
+          <tr class="hover:bg-slate-50 {!showDeleted && !t.active ? 'text-slate-400' : ''} {t.id === flash ? 'row-flash' : ''}">
             <td class="font-medium">
               <span class="inline-flex items-center gap-2"><span class="h-3.5 w-3.5 shrink-0 rounded-sm {colorClass(t.color)} {!showDeleted && !t.active ? 'opacity-40' : ''}"></span>{t.name}</span>
             </td>

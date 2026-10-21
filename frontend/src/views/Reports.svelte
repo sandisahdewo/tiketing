@@ -16,7 +16,8 @@
   const admin = isAdmin()
 
   // todaySales opens the transaction list of today (the cashier's "Riwayat hari ini").
-  let { todaySales = false }: { todaySales?: boolean } = $props()
+  // highlightSale is put on top of that list and blinks (a sale just made).
+  let { todaySales = false, highlightSale = null }: { todaySales?: boolean; highlightSale?: number | null } = $props()
   // Only decides how the page opens; later changes don't matter.
   const openToday = untrack(() => todaySales)
 
@@ -217,6 +218,7 @@
     {:else if tab === 'sales' && report}
       <div class="mt-2 flex min-h-0 flex-1 flex-col">
         <SalesBrowser
+          highlight={untrack(() => highlightSale)}
           from={report.from}
           to={report.to}
           waiting={loading}

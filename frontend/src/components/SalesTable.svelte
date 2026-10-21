@@ -15,11 +15,14 @@
     sales,
     expanded = $bindable({}),
     empty = 'Tidak ada transaksi.',
+    flash = null,
     ondeleted
   }: {
     sales: model.Sale[]
     expanded?: Record<number, boolean>
     empty?: string
+    // id of a sale whose row blinks green (just added)
+    flash?: number | null
     ondeleted?: () => void
   } = $props()
 
@@ -61,7 +64,7 @@
   <thead class="sticky top-0"><tr><th class="w-8"></th><th>Waktu</th><th>No. Nota</th><th>Kasir</th><th>Loket</th><th class="text-right">Total</th><th class="text-center">Cetak</th><th></th></tr></thead>
   <tbody>
     {#each sales as s (s.id)}
-      <tr class="cursor-pointer hover:bg-slate-50 {s.deletedAt ? 'text-slate-400' : ''}" onclick={() => (expanded[s.id] = !expanded[s.id])}>
+      <tr class="cursor-pointer hover:bg-slate-50 {s.deletedAt ? 'text-slate-400' : ''} {s.id === flash ? 'row-flash' : ''}" onclick={() => (expanded[s.id] = !expanded[s.id])}>
         <td class="text-slate-400">{expanded[s.id] ? '▾' : '▸'}</td>
         <td>{formatDateTime(s.createdAt)}</td>
         <td class="font-mono {s.deletedAt ? 'line-through' : ''}">{s.invoiceNo}</td>

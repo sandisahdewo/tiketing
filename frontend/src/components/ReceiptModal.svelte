@@ -9,12 +9,15 @@
     saleId,
     title = 'Nota',
     newTransaction = false,
-    onclose
+    onclose,
+    onview
   }: {
     saleId: number
     title?: string
     newTransaction?: boolean
     onclose: () => void
+    // shows the sale in the transaction list
+    onview?: () => void
   } = $props()
 
   let view = $state<main.ReceiptView | null>(null)
@@ -77,6 +80,9 @@
     {/if}
   </div>
   {#snippet footer()}
+    {#if onview}
+      <button class="btn btn-secondary mr-auto" onclick={onview} disabled={printing}>Lihat Transaksi</button>
+    {/if}
     <button class="btn btn-secondary" onclick={print} disabled={printing || !view || view.deleted}>
       {printing ? 'Mencetak…' : view && view.printCount > 0 ? `Cetak Ulang (F9)` : 'Cetak Nota (F9)'}
     </button>

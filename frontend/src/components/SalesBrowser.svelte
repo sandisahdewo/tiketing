@@ -15,6 +15,7 @@
     refresh = 0,
     waiting = false,
     emptyText = 'Tidak ada transaksi.',
+    highlight = null,
     ondeleted
   }: {
     from: string
@@ -25,8 +26,14 @@
     // the parent is still loading something this list depends on
     waiting?: boolean
     emptyText?: string
+    // a sale to show at the top of the first page and blink (just made)
+    highlight?: number | null
     ondeleted?: () => void
   } = $props()
+
+  // highlight is applied to the first load only; later pages and searches are normal.
+  let pending = untrack(() => highlight)
+  let flash = $state<number | null>(null)
 
   const pageSize = 100
 
@@ -52,6 +59,16 @@
       if (out.sales.length === 0 && out.count > 0 && page > 1) {
         page = Math.ceil(out.count / pageSize)
         return load()
+      }
+      if (pending !== null && page === 1 && !appliedSearch && !deleted) {
+        const id = pending
+        pending = null
+        const rest = out.sales.filter((s) => s.id !== id)
+        const sale = out.sales.find((s) => s.id === id) ?? (await App.GetSale(id))
+        if (seq !== requestSeq) return
+        out.sales = [sale, ...rest]
+        flash = id
+        setTimeout(() => (flash = null), 2000)
       }
       result = out
       expanded = {}
@@ -109,7 +126,7 @@
   <div class="relative mt-2 flex min-h-0 flex-1 flex-col">
     <div class="card min-h-40 flex-1 overflow-y-auto">
       {#if result}
-        <SalesTable {sales} bind:expanded empty={appliedSearch ? 'Tidak ada transaksi yang cocok.' : emptyText} ondeleted={() => { load(); ondeleted?.() }} />
+        <SalesTable {sales} bind:expanded {flash} empty={appliedSearch ? 'Tidak ada transaksi yang cocok.' : emptyText} ondeleted={() => { load(); ondeleted?.() }} />
       {/if}
     </div>
     <LoadingOverlay show={loading || waiting || !result} />

@@ -7,7 +7,7 @@
   import { formatMoney, formatRp } from '../lib/money'
   import { colorClass } from '../lib/colors'
 
-  let { onhistory }: { onhistory: () => void } = $props()
+  let { onhistory, onshowsale }: { onhistory: () => void; onshowsale: (id: number) => void } = $props()
 
   type CartItem = { ticket: model.Ticket; qty: number }
 
@@ -280,5 +280,15 @@
 {/if}
 
 {#if lastSaleId !== null}
-  <ReceiptModal saleId={lastSaleId} title="Pembayaran Berhasil" newTransaction onclose={newTransaction} />
+  <ReceiptModal
+    saleId={lastSaleId}
+    title="Pembayaran Berhasil"
+    newTransaction
+    onclose={newTransaction}
+    onview={() => {
+      const id = lastSaleId
+      newTransaction()
+      if (id !== null) onshowsale(id)
+    }}
+  />
 {/if}
