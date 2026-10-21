@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/base64"
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,12 +27,39 @@ var (
 	invoicePartPattern = regexp.MustCompile(`^[A-Z0-9]{0,6}$`)
 )
 
+// ValidateInvoiceCode checks a counter's invoice code: 1-4 letters or digits.
 func ValidateInvoiceCode(code string) (string, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
-	if !invoicePartPattern.MatchString(code) || len(code) > 4 {
-		return "", model.Invalid("Kode nota maksimal 4 karakter huruf/angka")
+	if code == "" || !invoicePartPattern.MatchString(code) || len(code) > 4 {
+		return "", model.Invalid("Kode nota 1-4 karakter huruf/angka")
 	}
 	return code, nil
+}
+
+const maxCounterName = 30
+
+func validateCounter(in *model.CounterInput) error {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return model.Invalid("Nama loket wajib diisi")
+	}
+	if utf8.RuneCountInString(in.Name) > maxCounterName {
+		return model.Invalid("Nama loket maksimal 30 karakter")
+	}
+	code, err := ValidateInvoiceCode(in.InvoiceCode)
+	if err != nil {
+		return err
+	}
+	in.InvoiceCode = code
+	return nil
+}
+
+func cleanDeviceName(name string) string {
+	name = strings.TrimSpace(name)
+	if r := []rune(name); len(r) > 60 {
+		name = string(r[:60])
+	}
+	return name
 }
 
 type Local struct {
@@ -354,19 +382,8 @@ func (l *Local) CreateSale(token string, in model.SaleInput) (model.Sale, error)
 	if in.Paid < 0 || in.Paid > maxPrice*maxQty {
 		return model.Sale{}, model.Invalid("Jumlah bayar tidak valid")
 	}
-	code, err := ValidateInvoiceCode(in.InvoiceCode)
-	if err != nil {
-		return model.Sale{}, err
-	}
-	return l.Store.CreateSale(u.ID, cleanTerminal(in.Terminal), code, items, in.Paid)
-}
-
-func cleanTerminal(terminal string) string {
-	terminal = strings.TrimSpace(terminal)
-	if terminal == "" {
-		return "-"
-	}
-	return terminal
+	// The server, not the PC, decides the counter: the one assigned to it.
+	return l.Store.CreateSale(u.ID, in.DeviceID, items, in.Paid)
 }
 
 func (l *Local) GetSale(token string, id int64) (model.Sale, error) {
@@ -397,7 +414,83 @@ func (l *Local) RecordPrint(token string, in model.PrintInput) error {
 	if sale.DeletedAt != nil {
 		return model.Invalid("Nota sudah dihapus, tidak bisa dicetak")
 	}
-	return l.Store.RecordPrint(in.SaleID, u.ID, cleanTerminal(in.Terminal))
+	terminal := "-"
+	if c, err := l.Store.CounterByDevice(in.DeviceID); err == nil {
+		terminal = c.Name
+	}
+	return l.Store.RecordPrint(in.SaleID, u.ID, terminal)
+}
+
+func (l *Local) ListCounters(token string) ([]model.Counter, error) {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return nil, err
+	}
+	return l.Store.ListCounters()
+}
+
+func (l *Local) SaveCounter(token string, in model.CounterInput) (model.Counter, error) {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return model.Counter{}, err
+	}
+	if err := validateCounter(&in); err != nil {
+		return model.Counter{}, err
+	}
+	if in.ID == 0 {
+		return l.Store.CreateCounter(in)
+	}
+	return l.Store.UpdateCounter(in)
+}
+
+func (l *Local) SetCounterActive(token string, id int64, active bool) error {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return err
+	}
+	return l.Store.SetCounterActive(id, active)
+}
+
+func (l *Local) AssignCounter(token string, in model.AssignCounterInput) error {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return err
+	}
+	err := l.Store.AssignCounter(in.CounterID, strings.TrimSpace(in.DeviceID), cleanDeviceName(in.DeviceName), in.Force)
+	var taken *store.ErrCounterTaken
+	if errors.As(err, &taken) {
+		return model.Invalid(taken.Error())
+	}
+	return err
+}
+
+// DeviceCounter is the counter of the PC deviceID (ErrNotFound when it has
+// none). It needs no login: the PC shows its counter on the login screen.
+func (l *Local) DeviceCounter(deviceID string) (model.Counter, error) {
+	c, err := l.Store.CounterByDevice(strings.TrimSpace(deviceID))
+	if err == nil {
+		l.Store.TouchCounter(c.DeviceID)
+	}
+	return c, err
+}
+
+// SetupCounter gives the server PC a counter at first setup: a new one called
+// name with the next free number as invoice code. It is
+// called by the server app itself, before anyone can log in.
+func (l *Local) SetupCounter(deviceID, deviceName, name string) error {
+	if _, err := l.Store.CounterByDevice(deviceID); err == nil {
+		return nil
+	}
+	in := model.CounterInput{Name: name, InvoiceCode: "1"}
+	if err := validateCounter(&in); err != nil {
+		return err
+	}
+	code, err := l.Store.NextCounterCode()
+	if err != nil {
+		return err
+	}
+	in.InvoiceCode = code
+	c, err := l.Store.CreateCounter(in)
+	if err != nil {
+		return err
+	}
+	return l.Store.AssignCounter(c.ID, deviceID, cleanDeviceName(deviceName), false)
 }
 
 // today is the server's current date; cashiers only see reports for it.

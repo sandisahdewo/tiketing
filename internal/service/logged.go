@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"sync"
 
 	"tiket/internal/applog"
@@ -201,7 +202,7 @@ func (l *Logged) DeleteUser(token string, id int64) error {
 func (l *Logged) CreateSale(token string, in model.SaleInput) (model.Sale, error) {
 	c := l.begin(token)
 	out, err := c.svc.CreateSale(token, in)
-	c.log("CreateSale", err, in, "invoice", out.InvoiceNo, "items", len(in.Items), "total", money.Format(out.Total), "paid", money.Format(in.Paid))
+	c.log("CreateSale", err, in, "invoice", out.InvoiceNo, "counter", out.Terminal, "items", len(in.Items), "total", money.Format(out.Total), "paid", money.Format(in.Paid))
 	return out, err
 }
 
@@ -238,7 +239,7 @@ func (l *Logged) DeleteSale(token string, in model.DeleteSaleInput) error {
 func (l *Logged) Report(token string, q model.ReportQuery) (model.Report, error) {
 	c := l.begin(token)
 	out, err := c.svc.Report(token, q)
-	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "category", q.Category, "userId", q.UserID, "terminal", q.Terminal, "total", money.Format(out.Total))
+	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "category", q.Category, "userId", q.UserID, "counterId", q.CounterID, "total", money.Format(out.Total))
 	return out, err
 }
 
@@ -254,6 +255,45 @@ func (l *Logged) RecordPrint(token string, in model.PrintInput) error {
 	err := c.svc.RecordPrint(token, in)
 	c.log("RecordPrint", err, in, "sale", in.SaleID)
 	return err
+}
+
+func (l *Logged) ListCounters(token string) ([]model.Counter, error) {
+	c := l.begin(token)
+	out, err := c.svc.ListCounters(token)
+	c.logError("ListCounters", err, nil)
+	return out, err
+}
+
+func (l *Logged) SaveCounter(token string, in model.CounterInput) (model.Counter, error) {
+	c := l.begin(token)
+	out, err := c.svc.SaveCounter(token, in)
+	c.log("SaveCounter", err, in, "id", out.ID, "name", in.Name, "invoiceCode", in.InvoiceCode)
+	return out, err
+}
+
+func (l *Logged) SetCounterActive(token string, id int64, active bool) error {
+	c := l.begin(token)
+	err := c.svc.SetCounterActive(token, id, active)
+	c.log("SetCounterActive", err, nil, "id", id, "active", active)
+	return err
+}
+
+func (l *Logged) AssignCounter(token string, in model.AssignCounterInput) error {
+	c := l.begin(token)
+	err := c.svc.AssignCounter(token, in)
+	c.log("AssignCounter", err, in, "counterId", in.CounterID, "device", in.DeviceName, "force", in.Force)
+	return err
+}
+
+// DeviceCounter runs on every start and settings view; only failures other
+// than "no counter yet" are worth a line.
+func (l *Logged) DeviceCounter(deviceID string) (model.Counter, error) {
+	c := l.begin("")
+	out, err := c.svc.DeviceCounter(deviceID)
+	if !errors.Is(err, model.ErrNotFound) {
+		c.logError("DeviceCounter", err, nil)
+	}
+	return out, err
 }
 
 func (l *Logged) GetSettings(token string) (model.Settings, error) {

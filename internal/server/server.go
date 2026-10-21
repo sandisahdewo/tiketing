@@ -40,6 +40,10 @@ type ListTicketsRequest struct {
 	ActiveOnly bool   `json:"activeOnly"`
 }
 
+type DeviceRequest struct {
+	DeviceID string `json:"deviceId"`
+}
+
 type SetActiveRequest struct {
 	ID     int64 `json:"id"`
 	Active bool  `json:"active"`
@@ -53,7 +57,7 @@ type Empty struct{}
 const HeaderOpID = "X-Op-ID"
 
 var (
-	readRoutes  = map[string]bool{"reportFilters": true, "searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
+	readRoutes  = map[string]bool{"listCounters": true, "deviceCounter": true, "reportFilters": true, "searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
 	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted", "category", "userId", "terminal"}
 )
 
@@ -230,6 +234,21 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	}))
 	route("reportFilters", call(func(t string, _ Empty) (any, error) {
 		return svc.ReportFilters(t)
+	}))
+	route("listCounters", call(func(t string, _ Empty) (any, error) {
+		return svc.ListCounters(t)
+	}))
+	route("saveCounter", call(func(t string, in model.CounterInput) (any, error) {
+		return svc.SaveCounter(t, in)
+	}))
+	route("setCounterActive", call(func(t string, in SetActiveRequest) (any, error) {
+		return Empty{}, svc.SetCounterActive(t, in.ID, in.Active)
+	}))
+	route("assignCounter", call(func(t string, in model.AssignCounterInput) (any, error) {
+		return Empty{}, svc.AssignCounter(t, in)
+	}))
+	route("deviceCounter", call(func(_ string, in DeviceRequest) (any, error) {
+		return svc.DeviceCounter(in.DeviceID)
 	}))
 	route("getSettings", call(func(t string, _ Empty) (any, error) {
 		return svc.GetSettings(t)

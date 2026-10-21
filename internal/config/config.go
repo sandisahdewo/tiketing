@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -15,13 +17,29 @@ const (
 )
 
 type Config struct {
-	Mode        string `json:"mode"`
-	Port        int    `json:"port"`
-	ServerURL   string `json:"serverUrl"`
+	Mode      string `json:"mode"`
+	Port      int    `json:"port"`
+	ServerURL string `json:"serverUrl"`
+	// DeviceID identifies this PC to the server, which assigns it a counter.
+	DeviceID string `json:"deviceId"`
+	// Terminal is the name of this PC's counter as last seen, shown before
+	// login.
 	Terminal    string `json:"terminal"`
-	InvoiceCode string `json:"invoiceCode"`
 	PrinterName string `json:"printerName"`
 	PaperWidth  int    `json:"paperWidth"`
+}
+
+// EnsureDeviceID gives the PC a permanent random ID the first time it runs.
+func EnsureDeviceID(dir string, cfg *Config) error {
+	if cfg.DeviceID != "" {
+		return nil
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	cfg.DeviceID = hex.EncodeToString(b)
+	return Save(dir, *cfg)
 }
 
 func DataDir() (string, error) {

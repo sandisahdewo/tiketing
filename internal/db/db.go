@@ -156,10 +156,7 @@ func Inspect(path string) (BackupInfo, error) {
 	}
 	var last sql.NullString
 	if err := conn.QueryRow("SELECT COUNT(*), MAX(created_at) FROM sales WHERE deleted_at IS NULL").Scan(&info.Sales, &last); err != nil {
-		// Backups made before soft delete existed have no deleted_at column.
-		if err := conn.QueryRow("SELECT COUNT(*), MAX(created_at) FROM sales").Scan(&info.Sales, &last); err != nil {
-			return info, ErrNotBackup
-		}
+		return info, ErrNotBackup
 	}
 	info.LastSale = last.String
 	if err := conn.QueryRow("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").Scan(&info.Users); err != nil {

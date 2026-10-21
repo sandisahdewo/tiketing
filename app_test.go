@@ -14,11 +14,14 @@ import (
 func TestRestoreDatabase(t *testing.T) {
 	dir := t.TempDir()
 	a := NewApp(dir)
-	a.cfg = config.Config{Mode: config.ModeServer, Port: 0}
+	a.cfg = config.Config{Mode: config.ModeServer, Port: 0, DeviceID: "server-pc"}
 	if err := a.activate(); err != nil {
 		t.Fatal(err)
 	}
 	defer a.deactivate()
+	if err := a.local.SetupCounter(a.cfg.DeviceID, "SERVER", "LOKET 1"); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := a.svc.CreateFirstAdmin(model.UserInput{Username: "admin", FullName: "Admin", Password: "rahasia"}); err != nil {
 		t.Fatal(err)

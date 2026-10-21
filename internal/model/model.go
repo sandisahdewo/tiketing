@@ -110,11 +110,12 @@ type SaleItemInput struct {
 	Qty      int64 `json:"qty"`
 }
 
+// SaleInput is a sale from the PC with DeviceID; the server takes the counter
+// (name and invoice code) from that PC's assignment.
 type SaleInput struct {
-	Terminal    string          `json:"terminal"`
-	InvoiceCode string          `json:"invoiceCode"`
-	Items       []SaleItemInput `json:"items"`
-	Paid        int64           `json:"paid"`
+	DeviceID string          `json:"deviceId"`
+	Items    []SaleItemInput `json:"items"`
+	Paid     int64           `json:"paid"`
 }
 
 type SaleItem struct {
@@ -128,11 +129,15 @@ type SaleItem struct {
 }
 
 type Sale struct {
-	ID           int64      `json:"id"`
-	InvoiceNo    string     `json:"invoiceNo"`
-	UserID       int64      `json:"userId"`
-	CashierName  string     `json:"cashierName"`
+	ID          int64  `json:"id"`
+	InvoiceNo   string `json:"invoiceNo"`
+	UserID      int64  `json:"userId"`
+	CashierName string `json:"cashierName"`
+	// Terminal is the counter name printed on the receipt when the sale was
+	// made; CounterName is that counter's name now (for lists and reports).
 	Terminal     string     `json:"terminal"`
+	CounterID    int64      `json:"counterId"`
+	CounterName  string     `json:"counterName"`
 	Total        int64      `json:"total"`
 	Paid         int64      `json:"paid"`
 	ChangeAmount int64      `json:"changeAmount"`
@@ -157,15 +162,15 @@ type SaleQuery struct {
 // Category keeps the sales that contain at least one item of it (and, in a
 // report, counts only those items).
 type ReportFilter struct {
-	Category string `json:"category"`
-	UserID   int64  `json:"userId"`
-	Terminal string `json:"terminal"`
+	Category  string `json:"category"`
+	UserID    int64  `json:"userId"`
+	CounterID int64  `json:"counterId"`
 }
 
 // ReportFilters lists the choices for the report filters.
 type ReportFilters struct {
-	Cashiers  []ReportCashier `json:"cashiers"`
-	Terminals []string        `json:"terminals"`
+	Cashiers []ReportCashier `json:"cashiers"`
+	Counters []Counter       `json:"counters"`
 }
 
 type ReportCashier struct {
@@ -260,9 +265,39 @@ const (
 	DefaultPurposeWeekend = "WEEKEND REGULER"
 )
 
+// PrintInput records a print of a sale on the PC with DeviceID.
 type PrintInput struct {
 	SaleID   int64  `json:"saleId"`
-	Terminal string `json:"terminal"`
+	DeviceID string `json:"deviceId"`
+}
+
+// Counter is a loket: a named point of sale with its own invoice code, used
+// by at most one PC (DeviceID, empty when free).
+type Counter struct {
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	InvoiceCode string  `json:"invoiceCode"`
+	Active      bool    `json:"active"`
+	DeviceID    string  `json:"deviceId"`
+	DeviceName  string  `json:"deviceName"`
+	LastSeenAt  *string `json:"lastSeenAt"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+}
+
+type CounterInput struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	InvoiceCode string `json:"invoiceCode"`
+}
+
+// AssignCounterInput puts the PC DeviceID on a counter (CounterID 0 frees the
+// PC). A counter used by another PC is only taken over with Force.
+type AssignCounterInput struct {
+	CounterID  int64  `json:"counterId"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
+	Force      bool   `json:"force"`
 }
 
 type Status struct {

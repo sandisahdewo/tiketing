@@ -78,7 +78,22 @@ func setup(t *testing.T, svc Service) (admin, kasir string) {
 	admin = must(svc.Login("admin", "rahasia")).Token
 	must(svc.SaveUser(admin, model.UserInput{Username: "budi", FullName: "Budi", Role: model.RoleKasir, Password: "1234"}))
 	kasir = must(svc.Login("budi", "1234")).Token
+	useCounter(t, svc, admin, testDevice, "LOKET 1", "1")
 	return admin, kasir
+}
+
+// testDevice is the PC the tests sell from; setup gives it counter LOKET 1
+// with invoice code 1.
+const testDevice = "pc-test"
+
+// useCounter creates a counter and puts the PC device on it.
+func useCounter(t *testing.T, svc Service, admin, device, name, code string) model.Counter {
+	t.Helper()
+	c := must(svc.SaveCounter(admin, model.CounterInput{Name: name, InvoiceCode: code}))
+	if err := svc.AssignCounter(admin, model.AssignCounterInput{CounterID: c.ID, DeviceID: device, DeviceName: "PC " + name}); err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
 
 func exercise(t *testing.T, svc Service, c *clock) {
@@ -122,22 +137,21 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	if got := must(svc.ListTickets(admin, "", true, false)); len(got) != 1 || got[0].DeletedAt == nil {
 		t.Fatalf("deleted list wrong: %+v", got)
 	}
-	if _, err := svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 1}}, Paid: 9999999}); err == nil {
+	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 1}}, Paid: 9999999}); err == nil {
 		t.Fatal("sold a deleted ticket")
 	}
 	if err := svc.RestoreTicket(admin, elder.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: weekday.ID, Qty: 2}}, Paid: 100}); err == nil {
+	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: weekday.ID, Qty: 2}}, Paid: 100}); err == nil {
 		t.Fatal("underpaid sale accepted")
 	}
-	if _, err := svc.CreateSale(kasir, model.SaleInput{}); err == nil {
+	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice}); err == nil {
 		t.Fatal("empty sale accepted")
 	}
 
-	sale1 := must(svc.CreateSale(kasir, model.SaleInput{
-		Terminal: "LOKET 1",
+	sale1 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice,
 		Items: []model.SaleItemInput{
 			{TicketID: weekday.ID, Qty: 2},
 			{TicketID: couple.ID, Qty: 1},
@@ -145,7 +159,7 @@ func exercise(t *testing.T, svc Service, c *clock) {
 		},
 		Paid: 20000000,
 	}))
-	if sale1.InvoiceNo != "TKT202610050001" {
+	if sale1.InvoiceNo != "TKT1202610050001" {
 		t.Errorf("invoice = %s", sale1.InvoiceNo)
 	}
 	if sale1.Total != 3*3500000+5000050 || sale1.ChangeAmount != 20000000-sale1.Total {
@@ -164,8 +178,8 @@ func exercise(t *testing.T, svc Service, c *clock) {
 		t.Errorf("ticket name should come from relation: %s", again.Items[0].TicketName)
 	}
 
-	sale2 := must(svc.CreateSale(admin, model.SaleInput{Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 4}}, Paid: 6000000}))
-	if sale2.InvoiceNo != "TKT202610050002" {
+	sale2 := must(svc.CreateSale(admin, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 4}}, Paid: 6000000}))
+	if sale2.InvoiceNo != "TKT1202610050002" {
 		t.Errorf("invoice2 = %s", sale2.InvoiceNo)
 	}
 	if _, err := svc.GetSale(kasir, sale2.ID); !errors.Is(err, model.ErrForbidden) {
@@ -173,12 +187,12 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	}
 
 	c.t = time.Date(2026, 10, 14, 10, 0, 0, 0, time.Local)
-	sale3 := must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
-	if sale3.InvoiceNo != "TKT202610140001" {
+	sale3 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
+	if sale3.InvoiceNo != "TKT1202610140001" {
 		t.Errorf("invoice3 = %s", sale3.InvoiceNo)
 	}
 	c.t = time.Date(2026, 11, 1, 10, 0, 0, 0, time.Local)
-	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 2}}, Paid: 10000100}))
+	must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 2}}, Paid: 10000100}))
 
 	if got := must(svc.ListSales(kasir, model.SaleQuery{From: "2026-10-01", To: "2026-10-31"})); len(got) != 1 || got[0].CreatedAt[:10] != "2026-11-01" {
 		t.Errorf("kasir should see only own sales of today, got %+v", got)
@@ -221,13 +235,18 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	}
 
 	c.t = time.Date(2026, 11, 3, 10, 18, 0, 0, time.Local)
-	pony1 := must(svc.CreateSale(kasir, model.SaleInput{InvoiceCode: "25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
-	pony2 := must(svc.CreateSale(kasir, model.SaleInput{InvoiceCode: "25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
-	other := must(svc.CreateSale(admin, model.SaleInput{InvoiceCode: "26", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
+	useCounter(t, svc, admin, "pc-25", "LOKET 25", "25")
+	useCounter(t, svc, admin, "pc-26", "LOKET 26", "26")
+	pony1 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: "pc-25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
+	pony2 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: "pc-25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
+	other := must(svc.CreateSale(admin, model.SaleInput{DeviceID: "pc-26", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
 	if pony1.InvoiceNo != "PNY25202611030001" || pony2.InvoiceNo != "PNY25202611030002" || other.InvoiceNo != "PNY26202611030001" {
 		t.Errorf("invoice format: %s %s %s", pony1.InvoiceNo, pony2.InvoiceNo, other.InvoiceNo)
 	}
-	if _, err := svc.CreateSale(kasir, model.SaleInput{InvoiceCode: "12345", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}); err == nil {
+	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: "pc-none", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}); err == nil {
+		t.Error("a PC without a counter must not sell")
+	}
+	if _, err := svc.SaveCounter(admin, model.CounterInput{Name: "LOKET X", InvoiceCode: "12345"}); err == nil {
 		t.Error("too long invoice code accepted")
 	}
 
@@ -235,7 +254,7 @@ func exercise(t *testing.T, svc Service, c *clock) {
 		t.Errorf("new sale print count = %d", pony1.PrintCount)
 	}
 	for i := 0; i < 3; i++ {
-		if err := svc.RecordPrint(kasir, model.PrintInput{SaleID: pony1.ID, Terminal: "LOKET 1"}); err != nil {
+		if err := svc.RecordPrint(kasir, model.PrintInput{SaleID: pony1.ID, DeviceID: testDevice}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -362,7 +381,7 @@ func TestTopupCategory(t *testing.T) {
 		t.Errorf("update wrong: %+v", entry)
 	}
 
-	sale := must(svc.CreateSale(kasir, model.SaleInput{
+	sale := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice,
 		Items: []model.SaleItemInput{
 			{TicketID: entry.ID, Qty: 2},
 			{TicketID: topup100.ID, Qty: 1},
@@ -395,7 +414,7 @@ func TestKasirReportAndDeleteSale(t *testing.T) {
 	admin, kasir := setup(t, svc)
 	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	sell := func(token string, qty int64) model.Sale {
-		return must(svc.CreateSale(token, model.SaleInput{Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: qty}}, Paid: qty * 1000000}))
+		return must(svc.CreateSale(token, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: qty}}, Paid: qty * 1000000}))
 	}
 
 	c.t = time.Date(2026, 10, 4, 9, 0, 0, 0, time.Local)
@@ -452,7 +471,7 @@ func TestKasirReportAndDeleteSale(t *testing.T) {
 	}
 
 	next := sell(kasir, 1)
-	if next.InvoiceNo != "TKT202610050004" {
+	if next.InvoiceNo != "TKT1202610050004" {
 		t.Errorf("invoice number reused after delete: %s", next.InvoiceNo)
 	}
 }
@@ -548,7 +567,7 @@ func TestTicketActive(t *testing.T) {
 		t.Errorf("kasir must not list deleted tickets, got %v", err)
 	}
 
-	_, err := svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}, {TicketID: topup.ID, Qty: 1}}, Paid: 6000000})
+	_, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}, {TicketID: topup.ID, Qty: 1}}, Paid: 6000000})
 	var ve *model.ValidationError
 	if !errors.As(err, &ve) || !strings.Contains(ve.Message, "Topup") {
 		t.Errorf("selling an inactive ticket should fail with its name, got %v", err)
@@ -561,7 +580,7 @@ func TestTicketActive(t *testing.T) {
 	if err := svc.SetTicketActive(admin, topup.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
+	must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
 }
 
 func TestSearchSales(t *testing.T) {
@@ -574,13 +593,13 @@ func TestSearchSales(t *testing.T) {
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 50%", Price: 5000000, Category: model.CategoryTopup}))
 
 	c.t = time.Date(2026, 10, 4, 9, 0, 0, 0, time.Local)
-	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000}))
+	must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000}))
 	c.t = time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)
 	var sales []model.Sale
 	for i := 0; i < 7; i++ {
-		sales = append(sales, must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000})))
+		sales = append(sales, must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000})))
 	}
-	withTopup := must(svc.CreateSale(admin, model.SaleInput{Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
+	withTopup := must(svc.CreateSale(admin, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
 
 	month := model.SaleQuery{From: "2026-10-01", To: "2026-10-31"}
 	p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: month, Page: 2, PageSize: 3}))
@@ -601,7 +620,7 @@ func TestSearchSales(t *testing.T) {
 		"topup 50%":             1, // item name, case-insensitive; % is literal
 		withTopup.InvoiceNo[3:]: 1, // part of the invoice number
 		"budi":                  8, // cashier
-		"loket":                 0, // terminal is "-" in tests
+		"loket 1":               9, // every test sale is at counter LOKET 1
 		"tidak ada":             0,
 	} {
 		q := month
@@ -711,7 +730,7 @@ func TestSorting(t *testing.T) {
 	}
 
 	sell := func(token string, id int64, qty int64, price int64) model.Sale {
-		return must(svc.CreateSale(token, model.SaleInput{Items: []model.SaleItemInput{{TicketID: id, Qty: qty}}, Paid: qty * price}))
+		return must(svc.CreateSale(token, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: id, Qty: qty}}, Paid: qty * price}))
 	}
 	s1 := sell(kasir, cheap.ID, 1, 100000)  // 1.000, Budi
 	s2 := sell(admin, pricey.ID, 1, 900000) // 9.000, Pak Admin
@@ -768,12 +787,13 @@ func TestReportFilter(t *testing.T) {
 
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
-	sell := func(token, terminal string, items ...model.SaleItemInput) {
-		must(svc.CreateSale(token, model.SaleInput{Terminal: terminal, Items: items, Paid: 1e10}))
+	loket2 := useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")
+	sell := func(token, device string, items ...model.SaleItemInput) {
+		must(svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10}))
 	}
-	sell(kasir, "LOKET 1", model.SaleItemInput{TicketID: entry.ID, Qty: 2})                                                  // Budi: 20.000
-	sell(kasir, "LOKET 2", model.SaleItemInput{TicketID: entry.ID, Qty: 1}, model.SaleItemInput{TicketID: topup.ID, Qty: 1}) // Budi: 10.000 + 50.000
-	sell(sitiToken, "LOKET 2", model.SaleItemInput{TicketID: topup.ID, Qty: 2})                                              // Siti: 100.000
+	sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 2})                                              // Budi: 20.000
+	sell(kasir, "pc-2", model.SaleItemInput{TicketID: entry.ID, Qty: 1}, model.SaleItemInput{TicketID: topup.ID, Qty: 1}) // Budi: 10.000 + 50.000
+	sell(sitiToken, "pc-2", model.SaleItemInput{TicketID: topup.ID, Qty: 2})                                              // Siti: 100.000
 
 	day := model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-05"}
 	for _, tc := range []struct {
@@ -786,9 +806,9 @@ func TestReportFilter(t *testing.T) {
 		{model.ReportFilter{Category: model.CategoryTopup}, 2, 15000000, 2},
 		{model.ReportFilter{Category: model.CategoryTicket}, 2, 3000000, 2},
 		{model.ReportFilter{UserID: siti.ID}, 1, 10000000, 1},
-		{model.ReportFilter{Terminal: "LOKET 2"}, 2, 16000000, 2},
-		{model.ReportFilter{Terminal: "LOKET 2", Category: model.CategoryTicket}, 1, 1000000, 1},
-		{model.ReportFilter{Terminal: "LOKET 9"}, 0, 0, 0},
+		{model.ReportFilter{CounterID: loket2.ID}, 2, 16000000, 2},
+		{model.ReportFilter{CounterID: loket2.ID, Category: model.CategoryTicket}, 1, 1000000, 1},
+		{model.ReportFilter{CounterID: 999}, 0, 0, 0},
 	} {
 		q := day
 		q.ReportFilter = tc.f
@@ -819,10 +839,135 @@ func TestReportFilter(t *testing.T) {
 	for _, c := range f.Cashiers {
 		names = append(names, fmt.Sprintf("%s/%v", c.FullName, c.Deleted))
 	}
-	if strings.Join(names, ",") != "Budi/false,Pak Admin/false,Siti/true" || strings.Join(f.Terminals, ",") != "LOKET 1,LOKET 2" {
-		t.Errorf("filter choices: %v %v", names, f.Terminals)
+	var counters []string
+	for _, c := range f.Counters {
+		counters = append(counters, c.Name)
+	}
+	if strings.Join(names, ",") != "Budi/false,Pak Admin/false,Siti/true" || strings.Join(counters, ",") != "LOKET 1,LOKET 2" {
+		t.Errorf("filter choices: %v %v", names, counters)
 	}
 	if _, err := svc.ReportFilters(kasir); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("kasir must not list filter choices: %v", err)
+	}
+}
+
+func TestCounters(t *testing.T) {
+	local, c := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc) // pc-test has LOKET 1 (code 1)
+	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	sell := func(device string) (model.Sale, error) {
+		return svc.CreateSale(kasir, model.SaleInput{DeviceID: device, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, Paid: 1000000})
+	}
+
+	// Master data rules.
+	for _, in := range []model.CounterInput{
+		{Name: " ", InvoiceCode: "9"},
+		{Name: "loket 1", InvoiceCode: "9"}, // name taken, any case
+		{Name: "LOKET 9", InvoiceCode: "1"}, // code taken
+		{Name: "LOKET 9", InvoiceCode: ""},
+		{Name: "LOKET 9", InvoiceCode: "A-1"},
+	} {
+		if _, err := svc.SaveCounter(admin, in); err == nil {
+			t.Errorf("counter %+v accepted", in)
+		}
+	}
+	if _, err := svc.SaveCounter(kasir, model.CounterInput{Name: "LOKET 9", InvoiceCode: "9"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not save counters: %v", err)
+	}
+	two := must(svc.SaveCounter(admin, model.CounterInput{Name: "LOKET 2", InvoiceCode: "b2"}))
+	if two.InvoiceCode != "B2" || !two.Active || two.DeviceID != "" {
+		t.Errorf("new counter: %+v", two)
+	}
+
+	// One PC per counter, one counter per PC.
+	if err := svc.AssignCounter(admin, model.AssignCounterInput{CounterID: two.ID, DeviceID: "pc-a", DeviceName: "KASIR-A"}); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.AssignCounter(admin, model.AssignCounterInput{CounterID: two.ID, DeviceID: "pc-b", DeviceName: "KASIR-B"})
+	if err == nil || !strings.Contains(err.Error(), "KASIR-A") {
+		t.Errorf("taking a used counter without force: %v", err)
+	}
+	if err := svc.AssignCounter(admin, model.AssignCounterInput{CounterID: two.ID, DeviceID: "pc-b", DeviceName: "KASIR-B", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DeviceCounter("pc-a"); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("pc-a should have lost its counter: %v", err)
+	}
+	if got := must(svc.DeviceCounter("pc-b")); got.ID != two.ID || got.DeviceName != "KASIR-B" {
+		t.Errorf("pc-b counter: %+v", got)
+	}
+	if err := svc.AssignCounter(kasir, model.AssignCounterInput{CounterID: two.ID, DeviceID: "pc-a"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not assign counters: %v", err)
+	}
+
+	// The server takes the counter from the PC, not from the request.
+	c.t = time.Date(2026, 10, 5, 10, 0, 0, 0, time.Local)
+	sale := must(sell("pc-b"))
+	if sale.Terminal != "LOKET 2" || sale.CounterID != two.ID || sale.InvoiceNo != "TKTB2202610050001" {
+		t.Errorf("sale at pc-b: %s %d %s", sale.Terminal, sale.CounterID, sale.InvoiceNo)
+	}
+	if _, err := sell("pc-a"); err == nil || !strings.Contains(err.Error(), "belum punya loket") {
+		t.Errorf("PC without counter: %v", err)
+	}
+
+	// Renaming shows everywhere at once; the receipt keeps the printed name.
+	must(svc.SaveCounter(admin, model.CounterInput{ID: two.ID, Name: "LOKET DEPAN", InvoiceCode: "B2"}))
+	got := must(svc.GetSale(admin, sale.ID))
+	if got.Terminal != "LOKET 2" || got.CounterName != "LOKET DEPAN" {
+		t.Errorf("after rename: terminal %q counter %q", got.Terminal, got.CounterName)
+	}
+	q := model.SaleQuery{From: "2026-10-05", To: "2026-10-05", ReportFilter: model.ReportFilter{CounterID: two.ID}}
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: q})); p.Count != 1 || p.Sales[0].CounterName != "LOKET DEPAN" {
+		t.Errorf("list by counter after rename: %+v", p)
+	}
+	q.ReportFilter, q.Search = model.ReportFilter{}, "depan"
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: q})); p.Count != 1 {
+		t.Errorf("search by new counter name: %d", p.Count)
+	}
+
+	// Turning a counter off frees its PC, which then cannot sell.
+	if err := svc.SetCounterActive(admin, two.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sell("pc-b"); err == nil {
+		t.Error("PC of an inactive counter sold")
+	}
+	if err := svc.AssignCounter(admin, model.AssignCounterInput{CounterID: two.ID, DeviceID: "pc-b"}); err == nil {
+		t.Error("inactive counter assigned")
+	}
+
+	useCounter(t, svc, admin, "pc-old", "LOKET 3", "3")
+
+	// Prints record the printing PC's counter.
+	if err := svc.RecordPrint(kasir, model.PrintInput{SaleID: sale.ID, DeviceID: "pc-old"}); err != nil {
+		t.Fatal(err)
+	}
+	var printed string
+	local.Store.DB.QueryRow("SELECT terminal FROM sale_prints WHERE sale_id = ?", sale.ID).Scan(&printed)
+	if printed != "LOKET 3" {
+		t.Errorf("print terminal %q", printed)
+	}
+}
+
+func TestSetupCounter(t *testing.T) {
+	local, _ := newLocal(t)
+	if err := local.SetupCounter("server-pc", "SERVER", "LOKET UTAMA"); err != nil {
+		t.Fatal(err)
+	}
+	c := must(local.Store.CounterByDevice("server-pc"))
+	if c.Name != "LOKET UTAMA" || c.InvoiceCode != "1" {
+		t.Errorf("first counter: %+v", c)
+	}
+	// Running setup again keeps the counter; another PC gets the next code.
+	must(0, local.SetupCounter("server-pc", "SERVER", "LOKET LAIN"))
+	must(0, local.SetupCounter("pc-2", "PC2", "LOKET DUA"))
+	if c := must(local.Store.CounterByDevice("server-pc")); c.Name != "LOKET UTAMA" {
+		t.Errorf("setup changed the counter: %+v", c)
+	}
+	if c := must(local.Store.CounterByDevice("pc-2")); c.InvoiceCode != "2" {
+		t.Errorf("second counter code: %+v", c)
 	}
 }

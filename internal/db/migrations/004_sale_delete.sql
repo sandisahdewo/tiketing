@@ -1,3 +1,0 @@
-ALTER TABLE sales ADD COLUMN deleted_at TEXT;
-ALTER TABLE sales ADD COLUMN deleted_by INTEGER REFERENCES users (id);
-ALTER TABLE sales ADD COLUMN delete_reason TEXT NOT NULL DEFAULT '';

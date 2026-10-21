@@ -40,7 +40,9 @@ type App struct {
 	dataDir string
 	cfg     config.Config
 
-	svc      service.Service
+	svc service.Service
+	// local is the server's own service when this PC is the server
+	local    *service.Local
 	conn     *sql.DB
 	httpSrv  *http.Server
 	startErr string
@@ -54,16 +56,18 @@ type App struct {
 }
 
 type AppInfo struct {
-	Version     string   `json:"version"`
-	Mode        string   `json:"mode"`
-	Ready       bool     `json:"ready"`
-	StartError  string   `json:"startError"`
+	Version    string `json:"version"`
+	Mode       string `json:"mode"`
+	Ready      bool   `json:"ready"`
+	StartError string `json:"startError"`
+	// Terminal is this PC's counter name as last seen ("" when it has none).
 	Terminal    string   `json:"terminal"`
+	DeviceID    string   `json:"deviceId"`
+	DeviceName  string   `json:"deviceName"`
 	ServerURL   string   `json:"serverUrl"`
 	Port        int      `json:"port"`
 	Addresses   []string `json:"addresses"`
 	DataDir     string   `json:"dataDir"`
-	InvoiceCode string   `json:"invoiceCode"`
 	PrinterName string   `json:"printerName"`
 	PaperWidth  int      `json:"paperWidth"`
 	OS          string   `json:"os"`
@@ -78,6 +82,11 @@ func (a *App) startup(ctx context.Context) {
 	cfg, err := config.Load(a.dataDir)
 	if err != nil {
 		a.startErr = "Gagal membaca konfigurasi: " + err.Error()
+		applog.Action("Startup", err)
+		return
+	}
+	if err := config.EnsureDeviceID(a.dataDir, &cfg); err != nil {
+		a.startErr = "Gagal menyimpan konfigurasi: " + err.Error()
 		applog.Action("Startup", err)
 		return
 	}
@@ -145,7 +154,7 @@ func (a *App) startServer() error {
 			slog.Error("ServerStopped", "error", err.Error())
 		}
 	}()
-	a.conn, a.httpSrv, a.svc = conn, srv, service.NewLogged(local)
+	a.conn, a.httpSrv, a.svc, a.local = conn, srv, service.NewLogged(local), local
 	return nil
 }
 
@@ -160,7 +169,7 @@ func (a *App) deactivate() {
 		a.conn.Close()
 		a.conn = nil
 	}
-	a.svc = nil
+	a.svc, a.local = nil, nil
 	a.token, a.user = "", nil
 }
 
@@ -228,10 +237,11 @@ func lanAddresses() []string {
 	return out
 }
 
-func defaultTerminal() string {
+// deviceName is this PC's computer name, shown next to its counter.
+func deviceName() string {
 	name, err := os.Hostname()
 	if err != nil || name == "" {
-		return "LOKET 1"
+		return "KOMPUTER"
 	}
 	return strings.ToUpper(name)
 }
@@ -239,10 +249,6 @@ func defaultTerminal() string {
 func (a *App) GetAppInfo() AppInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	terminal := a.cfg.Terminal
-	if terminal == "" {
-		terminal = defaultTerminal()
-	}
 	printerName := a.cfg.PrinterName
 	if printerName == "" {
 		printerName = printer.Default()
@@ -252,12 +258,13 @@ func (a *App) GetAppInfo() AppInfo {
 		Mode:        a.cfg.Mode,
 		Ready:       a.svc != nil,
 		StartError:  a.startErr,
-		Terminal:    terminal,
+		Terminal:    a.cfg.Terminal,
+		DeviceID:    a.cfg.DeviceID,
+		DeviceName:  deviceName(),
 		ServerURL:   a.cfg.ServerURL,
 		Port:        a.cfg.Port,
 		Addresses:   lanAddresses(),
 		DataDir:     a.dataDir,
-		InvoiceCode: a.cfg.InvoiceCode,
 		PrinterName: printerName,
 		PaperWidth:  a.cfg.PaperWidth,
 		OS:          runtime.GOOS,
@@ -267,10 +274,10 @@ func (a *App) GetAppInfo() AppInfo {
 func cleanTerminal(terminal string) (string, error) {
 	terminal = strings.TrimSpace(terminal)
 	if terminal == "" {
-		return "", model.Invalid("Nama terminal/loket wajib diisi")
+		return "", model.Invalid("Nama loket wajib diisi")
 	}
 	if len([]rune(terminal)) > 30 {
-		return "", model.Invalid("Nama terminal maksimal 30 karakter")
+		return "", model.Invalid("Nama loket maksimal 30 karakter")
 	}
 	return terminal, nil
 }
@@ -295,6 +302,12 @@ func (a *App) SetupServer(port int, terminal string) (err error) {
 		a.deactivate()
 		return err
 	}
+	// The server PC gets its counter now, before anyone can log in.
+	if err := a.local.SetupCounter(a.cfg.DeviceID, deviceName(), terminal); err != nil {
+		a.cfg.Mode = ""
+		a.deactivate()
+		return err
+	}
 	a.startErr = ""
 	applog.SetTerminal(terminal)
 	return config.Save(a.dataDir, a.cfg)
@@ -315,20 +328,17 @@ func (a *App) TestServer(serverURL string) (st model.Status, err error) {
 	return st, nil
 }
 
-func (a *App) SetupClient(serverURL, terminal string) (err error) {
-	defer func() { applog.Action("SetupClient", err, "server", serverURL, "terminal", terminal) }()
-	terminal, err = cleanTerminal(terminal)
-	if err != nil {
-		return err
-	}
+// SetupClient connects this PC to a server. Its counter is then chosen by an
+// admin in Pengaturan.
+func (a *App) SetupClient(serverURL string) (err error) {
+	defer func() { applog.Action("SetupClient", err, "server", serverURL) }()
 	if _, err := a.TestServer(serverURL); err != nil {
 		return err
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.deactivate()
-	a.cfg.Mode, a.cfg.ServerURL, a.cfg.Terminal = config.ModeClient, service.NormalizeServerURL(serverURL), terminal
-	applog.SetTerminal(terminal)
+	a.cfg.Mode, a.cfg.ServerURL, a.cfg.Terminal = config.ModeClient, service.NormalizeServerURL(serverURL), ""
 	if err := a.activate(); err != nil {
 		return err
 	}
@@ -381,7 +391,116 @@ func (a *App) Login(username, password string) (model.User, error) {
 	a.mu.Lock()
 	a.token, a.user = sess.Token, &sess.User
 	a.mu.Unlock()
+	a.syncCounter(svc)
 	return sess.User, nil
+}
+
+// syncCounter fetches this PC's counter from the server and remembers its
+// name for the login screen.
+func (a *App) syncCounter(svc service.Service) (model.Counter, error) {
+	a.mu.Lock()
+	dev := a.cfg.DeviceID
+	a.mu.Unlock()
+	c, err := svc.DeviceCounter(dev)
+	switch {
+	case err == nil:
+		a.setCounterName(c.Name)
+	case errors.Is(err, model.ErrNotFound):
+		a.setCounterName("")
+		return model.Counter{}, nil
+	}
+	return c, err
+}
+
+func (a *App) setCounterName(name string) {
+	a.mu.Lock()
+	changed := a.cfg.Terminal != name
+	a.cfg.Terminal = name
+	cfg := a.cfg
+	a.mu.Unlock()
+	if changed {
+		if err := config.Save(a.dataDir, cfg); err != nil {
+			slog.Warn("SaveConfig", "error", err.Error())
+		}
+	}
+	if name == "" {
+		name = deviceName()
+	}
+	applog.SetTerminal(name)
+}
+
+// MyCounter is this PC's counter (ID 0 when it has none).
+func (a *App) MyCounter() (model.Counter, error) {
+	svc, _, err := a.service()
+	if err != nil {
+		return model.Counter{}, err
+	}
+	c, err := a.syncCounter(svc)
+	return c, a.check(err)
+}
+
+// ListCounters lists all counters (admin).
+func (a *App) ListCounters() ([]model.Counter, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return nil, err
+	}
+	out, err := svc.ListCounters(token)
+	return out, a.check(err)
+}
+
+func (a *App) SaveCounter(in model.CounterInput) (model.Counter, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.Counter{}, err
+	}
+	out, err := svc.SaveCounter(token, in)
+	if err == nil {
+		a.syncCounter(svc)
+	}
+	return out, a.check(err)
+}
+
+func (a *App) SetCounterActive(id int64, active bool) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	err = svc.SetCounterActive(token, id, active)
+	if err == nil {
+		a.syncCounter(svc)
+	}
+	return a.check(err)
+}
+
+// UseCounter puts this PC on a counter (admin). force takes over a counter
+// that another PC is using.
+func (a *App) UseCounter(counterID int64, force bool) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	dev := a.cfg.DeviceID
+	a.mu.Unlock()
+	err = svc.AssignCounter(token, model.AssignCounterInput{CounterID: counterID, DeviceID: dev, DeviceName: deviceName(), Force: force})
+	if err == nil {
+		a.syncCounter(svc)
+	}
+	return a.check(err)
+}
+
+// ReleaseCounter takes the PC deviceID off its counter (admin).
+func (a *App) ReleaseCounter(deviceID string) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	err = svc.AssignCounter(token, model.AssignCounterInput{DeviceID: deviceID})
+	if err == nil {
+		a.syncCounter(svc)
+	}
+	return a.check(err)
 }
 
 func (a *App) Logout() error {
@@ -494,9 +613,9 @@ func (a *App) CreateSale(items []model.SaleItemInput, paid int64) (model.Sale, e
 		return model.Sale{}, err
 	}
 	a.mu.Lock()
-	terminal, code := a.cfg.Terminal, a.cfg.InvoiceCode
+	dev := a.cfg.DeviceID
 	a.mu.Unlock()
-	out, err := svc.CreateSale(token, model.SaleInput{Terminal: terminal, InvoiceCode: code, Items: items, Paid: paid})
+	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid})
 	return out, a.check(err)
 }
 
@@ -655,8 +774,18 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 		}
 		parts = append(parts, "Kasir: "+name)
 	}
-	if f.Terminal != "" {
-		parts = append(parts, "Loket: "+f.Terminal)
+	if f.CounterID > 0 {
+		choices, err := svc.ReportFilters(token)
+		if err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf("#%d", f.CounterID)
+		for _, c := range choices.Counters {
+			if c.ID == f.CounterID {
+				name = c.Name
+			}
+		}
+		parts = append(parts, "Loket: "+name)
 	}
 	return strings.Join(parts, " · "), nil
 }
@@ -1040,9 +1169,9 @@ func (a *App) PrintReceipt(saleID int64) (msg string, err error) {
 		return msg, err
 	}
 	a.mu.Lock()
-	terminal := a.cfg.Terminal
+	dev := a.cfg.DeviceID
 	a.mu.Unlock()
-	if err := svc.RecordPrint(token, model.PrintInput{SaleID: saleID, Terminal: terminal}); err != nil {
+	if err := svc.RecordPrint(token, model.PrintInput{SaleID: saleID, DeviceID: dev}); err != nil {
 		return msg, a.check(fmt.Errorf("Nota tercetak, tapi gagal mencatat cetakan: %w", err))
 	}
 	return msg, nil
@@ -1137,25 +1266,18 @@ func (a *App) ListPrinters() ([]string, error) {
 	return printer.List(a.dataDir)
 }
 
-func (a *App) SaveLocalSettings(printerName string, paperWidth int, terminal, invoiceCode string) (err error) {
+// SaveLocalSettings saves this PC's printer settings. Its counter is set by
+// an admin (UseCounter).
+func (a *App) SaveLocalSettings(printerName string, paperWidth int) (err error) {
 	defer func() {
-		a.record(applog.NewOpID(), "SaveLocalSettings", err, "printer", printerName, "paperWidth", paperWidth, "terminal", terminal, "invoiceCode", invoiceCode)
+		a.record(applog.NewOpID(), "SaveLocalSettings", err, "printer", printerName, "paperWidth", paperWidth)
 	}()
-	terminal, err = cleanTerminal(terminal)
-	if err != nil {
-		return err
-	}
-	code, err := service.ValidateInvoiceCode(invoiceCode)
-	if err != nil {
-		return err
-	}
 	if paperWidth != 58 && paperWidth != 80 {
 		return model.Invalid("Lebar kertas harus 58 atau 80 mm")
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.cfg.PrinterName, a.cfg.PaperWidth, a.cfg.Terminal, a.cfg.InvoiceCode = printerName, paperWidth, terminal, code
-	applog.SetTerminal(terminal)
+	a.cfg.PrinterName, a.cfg.PaperWidth = printerName, paperWidth
 	return config.Save(a.dataDir, a.cfg)
 }
 

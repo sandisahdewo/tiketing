@@ -32,6 +32,12 @@ type Service interface {
 
 	RecordPrint(token string, in model.PrintInput) error
 
+	ListCounters(token string) ([]model.Counter, error)
+	SaveCounter(token string, in model.CounterInput) (model.Counter, error)
+	SetCounterActive(token string, id int64, active bool) error
+	AssignCounter(token string, in model.AssignCounterInput) error
+	DeviceCounter(deviceID string) (model.Counter, error)
+
 	GetSettings(token string) (model.Settings, error)
 	SaveSettings(token string, in model.Settings) error
 	GetLogo(token string) (string, error)

@@ -215,6 +215,29 @@ func (r *Remote) ReportFilters(token string) (model.ReportFilters, error) {
 	return out, r.call("reportFilters", token, nil, &out)
 }
 
+func (r *Remote) ListCounters(token string) ([]model.Counter, error) {
+	var out []model.Counter
+	return out, r.call("listCounters", token, nil, &out)
+}
+
+func (r *Remote) SaveCounter(token string, in model.CounterInput) (model.Counter, error) {
+	var out model.Counter
+	return out, r.call("saveCounter", token, in, &out)
+}
+
+func (r *Remote) SetCounterActive(token string, id int64, active bool) error {
+	return r.call("setCounterActive", token, map[string]any{"id": id, "active": active}, nil)
+}
+
+func (r *Remote) AssignCounter(token string, in model.AssignCounterInput) error {
+	return r.call("assignCounter", token, in, nil)
+}
+
+func (r *Remote) DeviceCounter(deviceID string) (model.Counter, error) {
+	var out model.Counter
+	return out, r.call("deviceCounter", "", map[string]string{"deviceId": deviceID}, &out)
+}
+
 func (r *Remote) GetSettings(token string) (model.Settings, error) {
 	var out model.Settings
 	return out, r.call("getSettings", token, nil, &out)

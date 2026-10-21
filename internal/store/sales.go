@@ -10,25 +10,40 @@ import (
 	"tiket/internal/model"
 )
 
-const saleColumns = `s.id, s.invoice_no, s.user_id, u.full_name, s.terminal, s.total, s.paid, s.change_amount, s.created_at,
+const saleColumns = `s.id, s.invoice_no, s.user_id, u.full_name, s.terminal, s.counter_id, c.name, s.total, s.paid, s.change_amount, s.created_at,
 	(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id), s.deleted_at, COALESCE(d.full_name, ''), s.delete_reason`
 
-const saleFrom = " FROM sales s JOIN users u ON u.id = s.user_id LEFT JOIN users d ON d.id = s.deleted_by"
+const saleFrom = " FROM sales s JOIN users u ON u.id = s.user_id LEFT JOIN users d ON d.id = s.deleted_by JOIN counters c ON c.id = s.counter_id"
 
 func scanSale(row interface{ Scan(...any) error }) (model.Sale, error) {
 	var s model.Sale
-	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount,
+	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.CounterID, &s.CounterName, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount,
 		&s.DeletedAt, &s.DeletedByName, &s.DeleteReason)
 	s.Items = []model.SaleItem{}
 	return s, err
 }
 
-func (s *Store) CreateSale(userID int64, terminal, invoiceCode string, items []model.SaleItemInput, paid int64) (model.Sale, error) {
+// CreateSale records a sale made on the PC deviceID, at that PC's counter.
+func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItemInput, paid int64) (model.Sale, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return model.Sale{}, err
 	}
 	defer tx.Rollback()
+
+	var counterID int64
+	var terminal, invoiceCode string
+	var active bool
+	err = tx.QueryRow("SELECT id, name, invoice_code, active FROM counters WHERE device_id = ?", deviceID).Scan(&counterID, &terminal, &invoiceCode, &active)
+	if err == sql.ErrNoRows || deviceID == "" {
+		return model.Sale{}, model.Invalid("Komputer ini belum punya loket. Minta admin memilih loket di Pengaturan.")
+	}
+	if err != nil {
+		return model.Sale{}, err
+	}
+	if !active {
+		return model.Sale{}, model.Invalid("Loket " + terminal + " sedang non-aktif")
+	}
 
 	type line struct {
 		ticketID, price, qty, subtotal int64
@@ -67,9 +82,9 @@ func (s *Store) CreateSale(userID int64, terminal, invoiceCode string, items []m
 		return model.Sale{}, err
 	}
 	res, err := tx.Exec(
-		`INSERT INTO sales (invoice_no, user_id, terminal, total, paid, change_amount, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		invoice, userID, terminal, total, paid, paid-total, now.Format(timeLayout),
+		`INSERT INTO sales (invoice_no, user_id, terminal, counter_id, total, paid, change_amount, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		invoice, userID, terminal, counterID, total, paid, paid-total, now.Format(timeLayout),
 	)
 	if err != nil {
 		return model.Sale{}, err
@@ -187,16 +202,16 @@ func salesFilter(q model.SaleQuery, userID int64) (string, []any, error) {
 		where += " AND s.user_id = ?"
 		args = append(args, userID)
 	}
-	if q.Terminal != "" {
-		where += " AND s.terminal = ?"
-		args = append(args, q.Terminal)
+	if q.CounterID > 0 {
+		where += " AND s.counter_id = ?"
+		args = append(args, q.CounterID)
 	}
 	if q.Category != "" {
 		where += " AND EXISTS (SELECT 1 FROM sale_items ci JOIN tickets ct ON ct.id = ci.ticket_id WHERE ci.sale_id = s.id AND ct.category = ?)"
 		args = append(args, q.Category)
 	}
 	if search := strings.TrimSpace(q.Search); search != "" {
-		where += ` AND (s.invoice_no LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\' OR s.terminal LIKE ? ESCAPE '\'
+		where += ` AND (s.invoice_no LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\' OR c.name LIKE ? ESCAPE '\'
 			OR EXISTS (SELECT 1 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id WHERE i.sale_id = s.id AND t.name LIKE ? ESCAPE '\'))`
 		p := likePattern(search)
 		args = append(args, p, p, p, p)
@@ -239,7 +254,7 @@ var saleSort = map[string]string{
 	"time":     "s.created_at",
 	"invoice":  "s.invoice_no",
 	"cashier":  "u.full_name COLLATE NOCASE",
-	"terminal": "s.terminal COLLATE NOCASE",
+	"terminal": "c.name COLLATE NOCASE",
 	"total":    "s.total",
 	"prints":   "(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id)",
 }

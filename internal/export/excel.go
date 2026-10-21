@@ -207,7 +207,7 @@ func Excel(d Data) ([]byte, error) {
 	w.header("Waktu", "No. Nota", "Kasir", "Loket", "Total", "Bayar", "Kembali", "Cetak")
 	var total int64
 	for _, s := range d.Sales {
-		w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(s.Terminal), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
+		w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
 		total += s.Total
 	}
 	w.data(true, text("Total"), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""))

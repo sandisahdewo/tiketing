@@ -45,6 +45,15 @@ func FileName(r model.Report, ext string) string {
 	return fmt.Sprintf("Laporan %s sd %s.%s", r.From, r.To, ext)
 }
 
+// counterName is the sale's counter as it is called now, like the report on
+// screen (the receipt keeps the name it was printed with).
+func counterName(s model.Sale) string {
+	if s.CounterName != "" {
+		return s.CounterName
+	}
+	return s.Terminal
+}
+
 func title(d Data) string {
 	name := strings.TrimSpace(d.Settings.BusinessName)
 	if name == "" {

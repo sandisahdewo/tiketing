@@ -1,7 +1,6 @@
 package db
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +55,8 @@ func TestInspectAndReplace(t *testing.T) {
 		}
 		conn.Exec("INSERT INTO users (username, full_name, password_hash, role, created_at, updated_at) VALUES ('admin', 'A', 'x', 'admin', '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
 		conn.Exec("INSERT INTO tickets (name, price, created_at, updated_at) VALUES ('Entry', 100, '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
-		conn.Exec("INSERT INTO sales (invoice_no, user_id, terminal, total, paid, change_amount, created_at) VALUES ('A1', 1, 'L1', 100, 100, 0, '2026-10-02 09:00:00')")
+		conn.Exec("INSERT INTO counters (name, invoice_code, created_at, updated_at) VALUES ('L1', '1', '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
+		conn.Exec("INSERT INTO sales (invoice_no, user_id, counter_id, terminal, total, paid, change_amount, created_at) VALUES ('A1', 1, 1, 'L1', 100, 100, 0, '2026-10-02 09:00:00')")
 		conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		return path
 	}
@@ -99,36 +99,28 @@ func TestInspectAndReplace(t *testing.T) {
 	}
 }
 
-// migrated returns a database at path with the first n migrations applied
-// (all when n < 0), with an admin and one sale.
-func migrated(t *testing.T, path string, n int) {
+// migrated creates a database at path with an admin, a counter and one sale.
+func migrated(t *testing.T, path string) {
 	t.Helper()
 	conn, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	names, _ := migrations()
-	if n < 0 {
-		n = len(names)
+	if err := Migrate(conn, filepath.Join(filepath.Dir(path), "backups")); err != nil {
+		t.Fatal(err)
 	}
-	for i := 0; i < n; i++ {
-		body, _ := migrationFiles.ReadFile("migrations/" + names[i])
-		if _, err := conn.Exec(string(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	conn.Exec(fmt.Sprintf("PRAGMA user_version = %d", n))
+	conn.Exec("INSERT INTO counters (name, invoice_code, created_at, updated_at) VALUES ('L1', '1', '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
 	conn.Exec("INSERT INTO users (username, full_name, password_hash, role, created_at, updated_at) VALUES ('admin', 'A', 'x', 'admin', '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
 	conn.Exec("INSERT INTO tickets (name, price, created_at, updated_at) VALUES ('Entry', 100, '2026-10-01 08:00:00', '2026-10-01 08:00:00')")
-	conn.Exec("INSERT INTO sales (invoice_no, user_id, terminal, total, paid, change_amount, created_at) VALUES ('A1', 1, 'L1', 100, 100, 0, '2026-10-02 09:00:00')")
+	conn.Exec("INSERT INTO sales (invoice_no, user_id, counter_id, terminal, total, paid, change_amount, created_at) VALUES ('A1', 1, 1, 'L1', 100, 100, 0, '2026-10-02 09:00:00')")
 	conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
 func TestPrepare(t *testing.T) {
 	dir := t.TempDir()
 	livePath := filepath.Join(dir, "live.db")
-	migrated(t, livePath, -1)
+	migrated(t, livePath)
 	live, err := Open(livePath)
 	if err != nil {
 		t.Fatal(err)
@@ -136,9 +128,9 @@ func TestPrepare(t *testing.T) {
 	defer live.Close()
 	work := filepath.Join(dir, "work")
 
-	backup := func(name string, n int, change string) string {
+	backup := func(name, change string) string {
 		path := filepath.Join(dir, name)
-		migrated(t, path, n)
+		migrated(t, path)
 		if change != "" {
 			conn, _ := Open(path)
 			if _, err := conn.Exec(change); err != nil {
@@ -150,8 +142,7 @@ func TestPrepare(t *testing.T) {
 		return path
 	}
 
-	// Same version, and an older one that gets migrated on the copy.
-	for _, src := range []string{backup("same.db", -1, ""), backup("old.db", 3, "")} {
+	for _, src := range []string{backup("same.db", "")} {
 		info, copyPath, err := Prepare(src, work, live)
 		if err != nil {
 			t.Fatalf("%s: %v", filepath.Base(src), err)
@@ -164,20 +155,17 @@ func TestPrepare(t *testing.T) {
 			t.Errorf("%s: no prepared copy", filepath.Base(src))
 		}
 	}
-	if old, _ := Inspect(filepath.Join(dir, "old.db")); old.Version != 3 {
-		t.Error("the backup file itself must not be changed")
-	}
 
-	corrupt := backup("corrupt.db", -1, "")
+	corrupt := backup("corrupt.db", "")
 	body, _ := os.ReadFile(corrupt)
 	os.WriteFile(corrupt, body[:len(body)/2], 0o644)
 
 	for _, tc := range []struct {
 		name, src, want string
 	}{
-		{"extra column", backup("extra.db", -1, "ALTER TABLE sales ADD COLUMN note TEXT"), "kolom sales.note tidak dikenal"},
-		{"missing index", backup("noindex.db", -1, "DROP INDEX sales_terminal"), "indeks sales_terminal tidak ada"},
-		{"no admin", backup("noadmin.db", -1, "UPDATE users SET role = 'kasir'"), "admin"},
+		{"extra column", backup("extra.db", "ALTER TABLE sales ADD COLUMN note TEXT"), "kolom sales.note tidak dikenal"},
+		{"missing index", backup("noindex.db", "DROP INDEX sales_counter_created"), "indeks sales_counter_created tidak ada"},
+		{"no admin", backup("noadmin.db", "UPDATE users SET role = 'kasir'"), "admin"},
 		{"corrupt", corrupt, ""},
 	} {
 		_, copyPath, err := Prepare(tc.src, work, live)
@@ -189,7 +177,7 @@ func TestPrepare(t *testing.T) {
 		}
 	}
 	entries, _ := os.ReadDir(work)
-	if len(entries) != 2 {
+	if len(entries) != 1 {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
