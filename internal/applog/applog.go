@@ -3,6 +3,7 @@
 package applog
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -204,6 +205,41 @@ func (d *dailyFile) Close() error {
 	err := d.f.Close()
 	d.f = nil
 	return err
+}
+
+// Dir is the log folder inside the data folder.
+func Dir(dataDir string) string {
+	return filepath.Join(dataDir, "logs")
+}
+
+// Zip writes every daily log file in dir to w as a zip archive and returns
+// how many it added.
+func Zip(dir string, w io.Writer) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	zw := zip.NewWriter(w)
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, filePrefix) || !strings.HasSuffix(name, fileSuffix) {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return n, err
+		}
+		f, err := zw.Create(name)
+		if err != nil {
+			return n, err
+		}
+		if _, err := f.Write(body); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, zw.Close()
 }
 
 // Open creates dir and returns a logger writing to today's file in it.

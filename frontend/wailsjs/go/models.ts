@@ -74,6 +74,28 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class RestoreInfo {
+	    path: string;
+	    name: string;
+	    size: number;
+	    sales: number;
+	    lastSale: string;
+	    users: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RestoreInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.sales = source["sales"];
+	        this.lastSale = source["lastSale"];
+	        this.users = source["users"];
+	    }
+	}
 
 }
 

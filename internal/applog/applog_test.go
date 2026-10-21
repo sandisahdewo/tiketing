@@ -1,6 +1,8 @@
 package applog
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"log/slog"
 	"os"
@@ -98,5 +100,29 @@ func TestErrorHasStack(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], "applog_test.go:") || !strings.Contains(lines[2], "TestErrorHasStack") {
 		t.Errorf("stack should start at the caller: %s", lines[2])
+	}
+}
+
+func TestZip(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "tiket-2026-10-20.log"), []byte("kemarin\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "tiket-2026-10-21.log"), []byte("hari ini\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "lain.txt"), []byte("x"), 0o644)
+
+	var buf bytes.Buffer
+	n, err := Zip(dir, &buf)
+	if err != nil || n != 2 {
+		t.Fatalf("Zip = %d, %v", n, err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "tiket-2026-10-20.log,tiket-2026-10-21.log" {
+		t.Errorf("zip holds %v", names)
 	}
 }

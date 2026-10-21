@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"time"
@@ -37,7 +36,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if logger, closer, err := applog.Open(filepath.Join(dataDir, "logs")); err == nil {
+	if logger, closer, err := applog.Open(applog.Dir(dataDir)); err == nil {
 		// Also routes the standard log package into the file.
 		applog.Init(logger, appVersion)
 		defer closer.Close()

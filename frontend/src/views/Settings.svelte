@@ -1,5 +1,6 @@
 <script lang="ts">
   import { App, model, handleError, errorMessage } from '../lib/api'
+  import type { main } from '../../wailsjs/go/models'
   import { session, isAdmin } from '../lib/session.svelte'
   import { updateState } from '../lib/update.svelte'
   import { toast } from '../lib/toast.svelte'
@@ -7,7 +8,7 @@
   import Field from '../components/Field.svelte'
   import Select from '../components/Select.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
-  import { today } from '../lib/date'
+  import { formatDateTime, today } from '../lib/date'
 
   let { onreset }: { onreset: () => void } = $props()
 
@@ -83,6 +84,89 @@
       logoError = errorMessage(e)
     } finally {
       logoBusy = false
+    }
+  }
+
+  let backingUp = $state(false)
+  let backupMessage = $state('')
+  let backupError = $state('')
+
+  async function backupDatabase() {
+    if (backingUp) return
+    backingUp = true
+    backupMessage = backupError = ''
+    try {
+      const path = await App.BackupDatabase()
+      if (path) {
+        backupMessage = 'Backup disimpan: ' + path
+        toast('Backup database disimpan')
+      }
+    } catch (e) {
+      backupError = errorMessage(e)
+    } finally {
+      backingUp = false
+    }
+  }
+
+  // Restore: pick and check a backup, confirm, then replace the database.
+  let restoreInfo = $state<main.RestoreInfo | null>(null)
+  let checkingBackup = $state(false)
+  let restoring = $state(false)
+
+  async function chooseRestore() {
+    if (backingUp || checkingBackup || restoring) return
+    backupMessage = backupError = ''
+    checkingBackup = true
+    try {
+      const info = await App.ChooseRestoreFile()
+      if (info.path) restoreInfo = info
+    } catch (e) {
+      backupError = errorMessage(e)
+    } finally {
+      checkingBackup = false
+    }
+  }
+
+  function cancelRestore() {
+    if (restoring) return
+    restoreInfo = null
+    App.CancelRestore()
+  }
+
+  async function restoreDatabase() {
+    if (!restoreInfo || restoring) return
+    restoring = true
+    try {
+      await App.RestoreDatabase()
+      toast('Database dipulihkan. Silakan login kembali.')
+      restoreInfo = null
+      onreset()
+    } catch (e) {
+      backupError = errorMessage(e)
+      restoreInfo = null
+    } finally {
+      restoring = false
+    }
+  }
+
+  let savingLogs = $state(false)
+  let logsMessage = $state('')
+  let logsError = $state('')
+
+  async function downloadLogs() {
+    if (savingLogs) return
+    savingLogs = true
+    logsMessage = logsError = ''
+    try {
+      const path = await App.DownloadLogs()
+      if (path) {
+        logsMessage = 'Log disimpan: ' + path
+        toast('Log aplikasi disimpan')
+      }
+    } catch (e) {
+      logsError = errorMessage(e)
+    } finally {
+      savingLogs = false
     }
   }
 
@@ -183,7 +267,7 @@
 <div class="h-full overflow-y-auto p-6">
   <h1 class="text-2xl font-bold">Pengaturan</h1>
 
-  <div class="mt-4 grid max-w-5xl grid-cols-1 gap-6 xl:grid-cols-2">
+  <div class="mt-4 grid max-w-5xl grid-cols-1 items-start gap-6 xl:grid-cols-2">
     <section class="card p-5">
       <h2 class="font-semibold">Komputer ini</h2>
       <p class="text-sm text-slate-500">Hanya berlaku untuk komputer ini.</p>
@@ -291,6 +375,32 @@
       </section>
     {/if}
 
+    {#if isAdmin()}
+      <section class="card p-5">
+        <h2 class="font-semibold">Backup database</h2>
+        {#if info.mode === 'server'}
+          <ul class="mt-2 space-y-1.5 text-sm text-slate-600">
+            <li>
+              <b class="text-slate-700">Backup</b> menyimpan salinan lengkap semua data (transaksi, tiket, pengguna, pengaturan) ke satu file .db.
+              Simpan di flashdisk atau folder Google Drive/OneDrive, jangan hanya di komputer ini. Backup harian otomatis tetap dibuat di folder data.
+            </li>
+            <li>
+              <b class="text-slate-700">Restore</b> mengganti semua data dengan isi file backup. Transaksi setelah waktu backup akan hilang. Backup diperiksa dan diuji
+              dulu sebelum dipakai, dan data sekarang otomatis dibackup sebelum diganti.
+            </li>
+          </ul>
+          <div class="mt-4 flex gap-2">
+            <button class="btn btn-secondary" onclick={backupDatabase} disabled={backingUp || checkingBackup || restoring}>{backingUp ? 'Membuat backup…' : 'Backup Database'}</button>
+            <button class="btn btn-secondary" onclick={chooseRestore} disabled={backingUp || checkingBackup || restoring}>{checkingBackup ? 'Memeriksa backup…' : 'Restore Database…'}</button>
+          </div>
+          {#if backupMessage}<p class="mt-3 text-sm break-all text-emerald-700">{backupMessage}</p>{/if}
+          {#if backupError}<p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{backupError}</p>{/if}
+        {:else}
+          <p class="mt-2 text-sm text-slate-600">Database ada di komputer server ({info.serverUrl}). Backup dan restore dilakukan dari sana.</p>
+        {/if}
+      </section>
+    {/if}
+
     <section class="card p-5">
       <h2 class="font-semibold">Update aplikasi</h2>
       <p class="mt-2 text-sm">Versi terpasang: <b>{info.version}</b></p>
@@ -299,6 +409,17 @@
       {#if info.mode === 'server'}
         <p class="mt-3 text-xs text-slate-500">Update komputer server lebih dulu, baru komputer client.</p>
       {/if}
+    </section>
+
+    <section class="card p-5">
+      <h2 class="font-semibold">Log aplikasi</h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Simpan catatan aktivitas dan error komputer ini (30 hari terakhir) sebagai satu file .zip untuk dikirim ke pengembang saat ada masalah.
+        {#if info.mode === 'client'}Kalau masalahnya terkait server, ambil juga log dari komputer server.{/if}
+      </p>
+      <button class="btn btn-secondary mt-4" onclick={downloadLogs} disabled={savingLogs}>{savingLogs ? 'Menyiapkan…' : 'Download Log'}</button>
+      {#if logsMessage}<p class="mt-3 text-sm break-all text-emerald-700">{logsMessage}</p>{/if}
+      {#if logsError}<p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{logsError}</p>{/if}
     </section>
   </div>
 </div>
@@ -310,6 +431,34 @@
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmReset = false)}>Batal</button>
       <button class="btn btn-danger" onclick={resetMode} disabled={resetting}>{resetting ? 'Memproses…' : 'Lanjutkan'}</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if restoreInfo}
+  <Modal title="Restore Database" onclose={cancelRestore} closable={!restoring} width="max-w-md">
+    <dl class="space-y-1 rounded-md bg-slate-50 p-3 text-sm">
+      <div class="flex gap-2"><dt class="w-36 text-slate-500">File</dt><dd class="font-medium break-all">{restoreInfo.name}</dd></div>
+      <div class="flex gap-2"><dt class="w-36 text-slate-500">Transaksi</dt><dd class="font-medium">{restoreInfo.sales.toLocaleString('id-ID')}</dd></div>
+      <div class="flex gap-2"><dt class="w-36 text-slate-500">Transaksi terakhir</dt><dd class="font-medium">{formatDateTime(restoreInfo.lastSale)}</dd></div>
+      <div class="flex gap-2"><dt class="w-36 text-slate-500">Pengguna</dt><dd class="font-medium">{restoreInfo.users}</dd></div>
+    </dl>
+    <ul class="mt-3 space-y-0.5 text-sm text-emerald-700">
+      <li>✓ File backup utuh</li>
+      <li>✓ Struktur data cocok dengan aplikasi ini</li>
+      <li>✓ Ada akun admin aktif</li>
+      <li>✓ Uji baca data oleh aplikasi berhasil</li>
+    </ul>
+    <p class="mt-3 text-sm">
+      <b class="text-red-700">Semua data sekarang akan diganti</b> dengan isi backup ini: transaksi, tiket, pengguna, dan pengaturan. Transaksi setelah
+      {formatDateTime(restoreInfo.lastSale)} akan hilang.
+    </p>
+    <p class="mt-2 text-sm text-slate-600">
+      Data sekarang otomatis dibackup dulu ke folder backups. Semua pengguna, termasuk di komputer kasir, harus login ulang.
+    </p>
+    {#snippet footer()}
+      <button class="btn btn-secondary" onclick={cancelRestore} disabled={restoring}>Batal</button>
+      <button class="btn btn-danger" onclick={restoreDatabase} disabled={restoring}>{restoring ? 'Memulihkan…' : 'Restore Database'}</button>
     {/snippet}
   </Modal>
 {/if}

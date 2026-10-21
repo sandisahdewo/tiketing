@@ -6,12 +6,24 @@ export function ApplyUpdate() {
   return window['go']['main']['App']['ApplyUpdate']();
 }
 
+export function BackupDatabase() {
+  return window['go']['main']['App']['BackupDatabase']();
+}
+
+export function CancelRestore() {
+  return window['go']['main']['App']['CancelRestore']();
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
 export function ChooseLogo() {
   return window['go']['main']['App']['ChooseLogo']();
+}
+
+export function ChooseRestoreFile() {
+  return window['go']['main']['App']['ChooseRestoreFile']();
 }
 
 export function CreateFirstAdmin(arg1) {
@@ -36,6 +48,10 @@ export function DeleteTicket(arg1) {
 
 export function DeleteUser(arg1) {
   return window['go']['main']['App']['DeleteUser'](arg1);
+}
+
+export function DownloadLogs() {
+  return window['go']['main']['App']['DownloadLogs']();
 }
 
 export function ExportReport(arg1, arg2) {
@@ -108,6 +124,10 @@ export function ReportFilters() {
 
 export function ResetSetup() {
   return window['go']['main']['App']['ResetSetup']();
+}
+
+export function RestoreDatabase() {
+  return window['go']['main']['App']['RestoreDatabase']();
 }
 
 export function RestoreTicket(arg1) {

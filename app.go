@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
@@ -48,6 +49,8 @@ type App struct {
 	user  *model.User
 
 	pendingUpdate *updater.Manifest
+	// a checked copy of the backup chosen for a restore, until it is used or cancelled
+	restoreCopy string
 }
 
 type AppInfo struct {
@@ -109,12 +112,17 @@ func (a *App) activate() error {
 	return errors.New("mode aplikasi belum dipilih")
 }
 
+func (a *App) dbPath() string    { return filepath.Join(a.dataDir, "tiket.db") }
+func (a *App) backupDir() string { return filepath.Join(a.dataDir, "backups") }
+
 func (a *App) startServer() error {
-	conn, err := db.Open(filepath.Join(a.dataDir, "tiket.db"))
+	conn, err := db.Open(a.dbPath())
 	if err != nil {
 		return fmt.Errorf("Gagal membuka database: %w", err)
 	}
-	backupDir := filepath.Join(a.dataDir, "backups")
+	backupDir := a.backupDir()
+	// Checked copies of an unfinished restore are not needed any more.
+	os.RemoveAll(a.restoreWorkDir())
 	if err := db.Migrate(conn, backupDir); err != nil {
 		conn.Close()
 		return fmt.Errorf("Gagal migrasi database: %w", err)
@@ -651,6 +659,249 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 		parts = append(parts, "Loket: "+f.Terminal)
 	}
 	return strings.Join(parts, " · "), nil
+}
+
+// BackupDatabase saves a complete copy of the database where the admin
+// chooses (e.g. a flash drive). Only the server PC holds the database. It
+// returns the saved path, or "" when the dialog was cancelled.
+func (a *App) BackupDatabase() (path string, err error) {
+	op := applog.NewOpID()
+	defer func() { a.record(op, "BackupDatabase", err, "path", path, "cancelled", err == nil && path == "") }()
+	a.mu.Lock()
+	conn, user := a.conn, a.user
+	a.mu.Unlock()
+	if user == nil || user.Role != model.RoleAdmin {
+		return "", model.ErrForbidden
+	}
+	if conn == nil {
+		return "", model.Invalid("Backup database hanya bisa dilakukan di komputer server")
+	}
+	path, err = wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title:           "Simpan Backup Database",
+		DefaultFilename: "tiket-backup-" + time.Now().Format("20060102-1504") + ".db",
+		Filters:         []wruntime.FileFilter{{DisplayName: "Database (*.db)", Pattern: "*.db"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".db") {
+		path += ".db"
+	}
+	if err := db.BackupTo(conn, path); err != nil {
+		return "", fmt.Errorf("Gagal membuat backup: %w", err)
+	}
+	return path, nil
+}
+
+// RestoreInfo describes a backup picked for a restore, after it passed every
+// check, for the admin to confirm before the current data is replaced.
+type RestoreInfo struct {
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	Sales    int64  `json:"sales"`
+	LastSale string `json:"lastSale"`
+	Users    int64  `json:"users"`
+}
+
+// restoreAllowed checks that an admin is logged in on the server PC.
+// The caller holds a.mu.
+func (a *App) restoreAllowed() error {
+	if a.user == nil || a.user.Role != model.RoleAdmin {
+		return model.ErrForbidden
+	}
+	if a.conn == nil {
+		return model.Invalid("Restore database hanya bisa dilakukan di komputer server")
+	}
+	return nil
+}
+
+func (a *App) restoreWorkDir() string { return filepath.Join(a.backupDir(), "restore") }
+
+// dropRestoreCopy removes a prepared restore copy. The caller holds a.mu.
+func (a *App) dropRestoreCopy() {
+	if a.restoreCopy != "" {
+		os.Remove(a.restoreCopy)
+		a.restoreCopy = ""
+	}
+}
+
+// trialRun runs the app's own reads on a prepared copy, so a backup that
+// would break the app is refused before anything is replaced.
+func trialRun(path string, info db.BackupInfo) error {
+	conn, err := db.OpenReadOnly(path)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	st := store.New(conn)
+	day := time.Now().Format("2006-01-02")
+	if info.LastSale != "" {
+		day = info.LastSale[:10]
+	}
+	q := model.SaleQuery{From: day, To: day}
+	if _, err := st.Report(model.ReportQuery{Period: "daily", From: day, To: day}, 0); err != nil {
+		return err
+	}
+	if _, err := st.SearchSales(model.SalePageQuery{SaleQuery: q, Page: 1, PageSize: 20}, 0); err != nil {
+		return err
+	}
+	if _, err := st.SearchTickets(model.TicketQuery{Status: model.TicketAll, Page: 1, PageSize: 20}); err != nil {
+		return err
+	}
+	if _, err := st.ListUsers(); err != nil {
+		return err
+	}
+	if _, err := st.GetSettings(); err != nil {
+		return err
+	}
+	_, err = st.ReportFilters()
+	return err
+}
+
+// ChooseRestoreFile lets the admin pick a backup and checks it on a copy:
+// intact file, migrated to this version, the same structure as the live
+// database, an active admin, and a trial run of the app's queries. The live
+// data is not touched. It returns an empty Path when the dialog was cancelled.
+func (a *App) ChooseRestoreFile() (out RestoreInfo, err error) {
+	op := applog.NewOpID()
+	var path string
+	defer func() {
+		if err != nil {
+			a.record(op, "ChooseRestoreFile", err, "path", path)
+		}
+	}()
+	a.mu.Lock()
+	err = a.restoreAllowed()
+	a.dropRestoreCopy()
+	a.mu.Unlock()
+	if err != nil {
+		return out, err
+	}
+	path, err = wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title:   "Pilih Backup Database",
+		Filters: []wruntime.FileFilter{{DisplayName: "Database (*.db)", Pattern: "*.db"}},
+	})
+	if err != nil || path == "" {
+		return out, err
+	}
+	return a.prepareRestore(path)
+}
+
+// prepareRestore checks the backup at path and keeps the checked copy for
+// RestoreDatabase.
+func (a *App) prepareRestore(path string) (out RestoreInfo, err error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return out, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.restoreAllowed(); err != nil {
+		return out, err
+	}
+	a.dropRestoreCopy()
+	info, copyPath, err := db.Prepare(path, a.restoreWorkDir(), a.conn)
+	if err != nil {
+		return out, model.Invalid(err.Error())
+	}
+	if err := trialRun(copyPath, info); err != nil {
+		os.Remove(copyPath)
+		return out, model.Invalid("Backup tidak bisa dibaca oleh aplikasi ini: " + err.Error())
+	}
+	a.restoreCopy = copyPath
+	return RestoreInfo{Path: path, Name: filepath.Base(path), Size: st.Size(), Sales: info.Sales, LastSale: info.LastSale, Users: info.Users}, nil
+}
+
+// CancelRestore drops the backup prepared by ChooseRestoreFile.
+func (a *App) CancelRestore() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dropRestoreCopy()
+}
+
+// RestoreDatabase replaces the database with the backup prepared by
+// ChooseRestoreFile. The current data is backed up first; if the restored
+// database cannot be started, that copy is put back. Everyone, including
+// cashier PCs, has to log in again.
+func (a *App) RestoreDatabase() (err error) {
+	op := applog.NewOpID()
+	var by, source, safety string
+	defer func() { a.record(op, "RestoreDatabase", err, "by", by, "prepared", source, "safetyBackup", safety) }()
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.restoreAllowed(); err != nil {
+		return err
+	}
+	if a.restoreCopy == "" {
+		return model.Invalid("Pilih file backup dulu")
+	}
+	by, source = a.user.Username, a.restoreCopy
+	defer a.dropRestoreCopy()
+
+	safety, err = db.Backup(a.conn, a.backupDir(), "pre-restore")
+	if err != nil {
+		return fmt.Errorf("Gagal membackup data sekarang, restore dibatalkan: %w", err)
+	}
+
+	a.deactivate()
+	if err := db.Replace(a.dbPath(), source); err != nil {
+		// The old file is untouched; start it again.
+		if startErr := a.activate(); startErr != nil {
+			a.startErr = startErr.Error()
+		}
+		return fmt.Errorf("Gagal mengganti database, data tidak berubah: %w", err)
+	}
+	if err := a.activate(); err != nil {
+		a.deactivate()
+		if rbErr := db.Replace(a.dbPath(), safety); rbErr != nil {
+			a.startErr = "Restore gagal dan data lama tidak bisa dikembalikan otomatis. Backup ada di " + safety
+			return fmt.Errorf("%s (%v; %v)", a.startErr, err, rbErr)
+		}
+		if startErr := a.activate(); startErr != nil {
+			a.startErr = startErr.Error()
+		}
+		return fmt.Errorf("Restore gagal, data dikembalikan seperti semula: %w", err)
+	}
+	return nil
+}
+
+// DownloadLogs saves this PC's log files (up to 30 days) as one zip file.
+// Any logged-in user may, so a cashier can send the log of their own PC.
+// It returns the saved path, or "" when the dialog was cancelled.
+func (a *App) DownloadLogs() (path string, err error) {
+	op := applog.NewOpID()
+	defer func() { a.record(op, "DownloadLogs", err, "path", path, "cancelled", err == nil && path == "") }()
+	a.mu.Lock()
+	terminal, user := a.cfg.Terminal, a.user
+	a.mu.Unlock()
+	if user == nil {
+		return "", model.ErrUnauthorized
+	}
+	name := strings.ToLower(strings.Join(strings.Fields(terminal), "-"))
+	if name == "" {
+		name = "pc"
+	}
+	path, err = wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title:           "Simpan Log Aplikasi",
+		DefaultFilename: "tiket-log-" + name + "-" + time.Now().Format("20060102") + ".zip",
+		Filters:         []wruntime.FileFilter{{DisplayName: "Zip (*.zip)", Pattern: "*.zip"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".zip") {
+		path += ".zip"
+	}
+	var buf bytes.Buffer
+	if _, err := applog.Zip(applog.Dir(a.dataDir), &buf); err != nil {
+		return "", fmt.Errorf("Gagal mengumpulkan log: %w", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		return "", fmt.Errorf("Gagal menyimpan log: %w", err)
+	}
+	return path, nil
 }
 
 func (a *App) GetSettings() (model.Settings, error) {
