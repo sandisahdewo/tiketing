@@ -37,6 +37,7 @@
   })
 
   async function print() {
+    if (printing) return
     printing = true
     try {
       toast(await App.PrintReceipt(saleId))

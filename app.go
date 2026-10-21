@@ -420,6 +420,17 @@ func (a *App) DeleteTicket(id int64) error {
 	return a.check(svc.DeleteTicket(token, id))
 }
 
+// SearchTickets returns one page of tickets for the master list and the
+// cashier screen.
+func (a *App) SearchTickets(q model.TicketQuery) (model.TicketPage, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.TicketPage{}, err
+	}
+	out, err := svc.SearchTickets(token, q)
+	return out, a.check(err)
+}
+
 func (a *App) SetTicketActive(id int64, active bool) error {
 	svc, token, err := a.service()
 	if err != nil {
@@ -499,6 +510,16 @@ func (a *App) ListSales(q model.SaleQuery) ([]model.Sale, error) {
 	return out, a.check(err)
 }
 
+// SearchSales returns one page of sales for the transaction lists.
+func (a *App) SearchSales(q model.SalePageQuery) (model.SalePage, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.SalePage{}, err
+	}
+	out, err := svc.SearchSales(token, q)
+	return out, a.check(err)
+}
+
 func (a *App) DeleteSale(id int64, reason string) error {
 	svc, token, err := a.service()
 	if err != nil {
@@ -531,15 +552,23 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 	if err != nil {
 		return "", a.check(err)
 	}
-	sales, err := svc.ListSales(token, model.SaleQuery{From: report.From, To: report.To})
+	// A PDF of a long range only lists the count, so don't fetch every sale for it.
+	salesQuery := model.SaleQuery{From: report.From, To: report.To}
+	page, err := svc.SearchSales(token, model.SalePageQuery{SaleQuery: salesQuery, PageSize: 1})
 	if err != nil {
 		return "", a.check(err)
+	}
+	var sales []model.Sale
+	if format != "pdf" || page.Count <= export.PDFMaxSales {
+		if sales, err = svc.ListSales(token, salesQuery); err != nil {
+			return "", a.check(err)
+		}
 	}
 	settings, err := svc.GetSettings(token)
 	if err != nil {
 		return "", a.check(err)
 	}
-	data := export.Data{Settings: settings, Report: report, Sales: sales, PrintedAt: time.Now()}
+	data := export.Data{Settings: settings, Report: report, Sales: sales, SalesCount: page.Count, PrintedAt: time.Now()}
 	if u := a.CurrentUser(); u != nil {
 		data.PrintedBy = u.FullName
 	}

@@ -66,6 +66,10 @@ export function SaveTicket(arg1:model.TicketInput):Promise<model.Ticket>;
 
 export function SaveUser(arg1:model.UserInput):Promise<model.User>;
 
+export function SearchSales(arg1:model.SalePageQuery):Promise<model.SalePage>;
+
+export function SearchTickets(arg1:model.TicketQuery):Promise<model.TicketPage>;
+
 export function SetTicketActive(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetupClient(arg1:string,arg2:string):Promise<void>;

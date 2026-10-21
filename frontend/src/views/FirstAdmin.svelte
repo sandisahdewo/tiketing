@@ -17,6 +17,7 @@
       error = 'Konfirmasi password tidak sama'
       return
     }
+    if (busy) return
     busy = true
     try {
       await App.CreateFirstAdmin(model.UserInput.createFrom({ id: 0, username, fullName, role: 'admin', password }))

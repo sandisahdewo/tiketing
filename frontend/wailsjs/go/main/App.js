@@ -126,6 +126,14 @@ export function SaveUser(arg1) {
   return window['go']['main']['App']['SaveUser'](arg1);
 }
 
+export function SearchSales(arg1) {
+  return window['go']['main']['App']['SearchSales'](arg1);
+}
+
+export function SearchTickets(arg1) {
+  return window['go']['main']['App']['SearchTickets'](arg1);
+}
+
 export function SetTicketActive(arg1, arg2) {
   return window['go']['main']['App']['SetTicketActive'](arg1, arg2);
 }

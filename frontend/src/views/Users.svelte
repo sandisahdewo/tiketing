@@ -36,7 +36,7 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || saving) return
     saving = true
     formError = ''
     try {
@@ -52,8 +52,11 @@
     }
   }
 
+  let deleting = $state(false)
+
   async function remove() {
-    if (!confirmDelete) return
+    if (!confirmDelete || deleting) return
+    deleting = true
     try {
       await App.DeleteUser(confirmDelete.id)
       toast('Pengguna dihapus')
@@ -61,6 +64,8 @@
       load()
     } catch (e) {
       handleError(e)
+    } finally {
+      deleting = false
     }
   }
 </script>
@@ -140,7 +145,7 @@
     <p>Hapus pengguna <b>{confirmDelete.fullName}</b> ({confirmDelete.username})? Pengguna tidak bisa login lagi. Riwayat transaksinya tetap tersimpan.</p>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmDelete = null)}>Batal</button>
-      <button class="btn btn-danger" onclick={remove}>Hapus</button>
+      <button class="btn btn-danger" onclick={remove} disabled={deleting}>{deleting ? 'Menghapus…' : 'Hapus'}</button>
     {/snippet}
   </Modal>
 {/if}

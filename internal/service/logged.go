@@ -161,6 +161,15 @@ func (l *Logged) RestoreTicket(token string, id int64) error {
 	return err
 }
 
+// SearchTickets runs on every scroll, page change and search, so it is only
+// logged when it fails.
+func (l *Logged) SearchTickets(token string, q model.TicketQuery) (model.TicketPage, error) {
+	c := l.begin(token)
+	out, err := c.svc.SearchTickets(token, q)
+	c.logError("SearchTickets", err, q)
+	return out, err
+}
+
 func (l *Logged) SetTicketActive(token string, id int64, active bool) error {
 	c := l.begin(token)
 	err := c.svc.SetTicketActive(token, id, active)
@@ -207,6 +216,15 @@ func (l *Logged) ListSales(token string, q model.SaleQuery) ([]model.Sale, error
 	c := l.begin(token)
 	out, err := c.svc.ListSales(token, q)
 	c.log("ListSales", err, q, "from", q.From, "to", q.To, "deleted", q.Deleted, "count", len(out))
+	return out, err
+}
+
+// SearchSales runs on every page change and (debounced) keystroke, so it is
+// only logged when it fails.
+func (l *Logged) SearchSales(token string, q model.SalePageQuery) (model.SalePage, error) {
+	c := l.begin(token)
+	out, err := c.svc.SearchSales(token, q)
+	c.logError("SearchSales", err, q)
 	return out, err
 }
 

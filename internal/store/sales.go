@@ -125,55 +125,75 @@ func (s *Store) GetSale(id int64) (model.Sale, error) {
 	return sales[0], nil
 }
 
-// loadItems fills the Items of every sale in sales with a single query.
+// itemBatch keeps each item query well under SQLite's limit on bound parameters.
+const itemBatch = 500
+
+// loadItems fills the Items of every sale in sales, one query per itemBatch sales.
 func (s *Store) loadItems(sales []model.Sale) error {
-	if len(sales) == 0 {
-		return nil
-	}
 	index := make(map[int64]int, len(sales))
-	args := make([]any, len(sales))
 	for i, sale := range sales {
 		index[sale.ID] = i
-		args[i] = sale.ID
 	}
-	rows, err := s.DB.Query(
-		`SELECT i.sale_id, i.id, i.ticket_id, t.name, t.category, i.price, i.qty, i.subtotal
-		 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id
-		 WHERE i.sale_id IN (?`+strings.Repeat(", ?", len(sales)-1)+`) ORDER BY i.id`, args...,
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var saleID int64
-		var it model.SaleItem
-		if err := rows.Scan(&saleID, &it.ID, &it.TicketID, &it.TicketName, &it.Category, &it.Price, &it.Qty, &it.Subtotal); err != nil {
+	for start := 0; start < len(sales); start += itemBatch {
+		batch := sales[start:min(start+itemBatch, len(sales))]
+		args := make([]any, len(batch))
+		for i, sale := range batch {
+			args[i] = sale.ID
+		}
+		rows, err := s.DB.Query(
+			`SELECT i.sale_id, i.id, i.ticket_id, t.name, t.category, i.price, i.qty, i.subtotal
+			 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id
+			 WHERE i.sale_id IN (?`+strings.Repeat(", ?", len(batch)-1)+`) ORDER BY i.id`, args...,
+		)
+		if err != nil {
 			return err
 		}
-		sale := &sales[index[saleID]]
-		sale.Items = append(sale.Items, it)
+		for rows.Next() {
+			var saleID int64
+			var it model.SaleItem
+			if err := rows.Scan(&saleID, &it.ID, &it.TicketID, &it.TicketName, &it.Category, &it.Price, &it.Qty, &it.Subtotal); err != nil {
+				rows.Close()
+				return err
+			}
+			sale := &sales[index[saleID]]
+			sale.Items = append(sale.Items, it)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 	}
-	return rows.Err()
+	return nil
 }
 
-func (s *Store) ListSales(from, to string, userID int64, deleted bool) ([]model.Sale, error) {
-	start, end, err := dateRange(from, to)
+// salesFilter is the WHERE clause shared by the sale list queries.
+func salesFilter(q model.SaleQuery, userID int64) (string, []any, error) {
+	start, end, err := dateRange(q.From, q.To)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	query := "SELECT " + saleColumns + saleFrom + " WHERE s.created_at >= ? AND s.created_at < ?"
-	if deleted {
-		query += " AND s.deleted_at IS NOT NULL"
-	} else {
-		query += " AND s.deleted_at IS NULL"
-	}
+	where := " WHERE s.created_at >= ? AND s.created_at < ?"
 	args := []any{start, end}
+	if q.Deleted {
+		where += " AND s.deleted_at IS NOT NULL"
+	} else {
+		where += " AND s.deleted_at IS NULL"
+	}
 	if userID > 0 {
-		query += " AND s.user_id = ?"
+		where += " AND s.user_id = ?"
 		args = append(args, userID)
 	}
-	rows, err := s.DB.Query(query+" ORDER BY s.created_at DESC, s.id DESC", args...)
+	if search := strings.TrimSpace(q.Search); search != "" {
+		where += ` AND (s.invoice_no LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\' OR s.terminal LIKE ? ESCAPE '\'
+			OR EXISTS (SELECT 1 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id WHERE i.sale_id = s.id AND t.name LIKE ? ESCAPE '\'))`
+		p := likePattern(search)
+		args = append(args, p, p, p, p)
+	}
+	return where, args, nil
+}
+
+func (s *Store) querySales(query string, args ...any) ([]model.Sale, error) {
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +210,36 @@ func (s *Store) ListSales(from, to string, userID int64, deleted bool) ([]model.
 		return nil, err
 	}
 	return sales, s.loadItems(sales)
+}
+
+// ListSales returns every sale matching q, newest first. A userID > 0 limits
+// it to that cashier.
+func (s *Store) ListSales(q model.SaleQuery, userID int64) ([]model.Sale, error) {
+	where, args, err := salesFilter(q, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.querySales("SELECT "+saleColumns+saleFrom+where+" ORDER BY s.created_at DESC, s.id DESC", args...)
+}
+
+// SearchSales returns one page of the sales matching q plus the count and
+// amount of all of them.
+func (s *Store) SearchSales(q model.SaleQuery, userID int64, page, pageSize int) (model.SalePage, error) {
+	out := model.SalePage{Sales: []model.Sale{}, Page: page, PageSize: pageSize}
+	where, args, err := salesFilter(q, userID)
+	if err != nil {
+		return out, err
+	}
+	err = s.DB.QueryRow("SELECT COUNT(*), COALESCE(SUM(s.total), 0)"+saleFrom+where, args...).Scan(&out.Count, &out.Amount)
+	if err != nil {
+		return out, err
+	}
+	if out.Count == 0 {
+		return out, nil
+	}
+	out.Sales, err = s.querySales("SELECT "+saleColumns+saleFrom+where+" ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?",
+		append(args, pageSize, (page-1)*pageSize)...)
+	return out, err
 }
 
 func (s *Store) DeleteSale(id, userID int64, reason string) error {

@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	maxNameLength = 100
-	maxQty        = 10000
-	maxPrice      = 1_000_000_000_00
+	defaultPageSize = 100
+	maxPageSize     = 500
+	maxNameLength   = 100
+	maxQty          = 10000
+	maxPrice        = 1_000_000_000_00
 )
 
 var (
@@ -128,6 +130,38 @@ func (l *Local) ListTickets(token, search string, deleted, activeOnly bool) ([]m
 		activeOnly = true
 	}
 	return l.Store.ListTickets(search, deleted, activeOnly)
+}
+
+func (l *Local) SearchTickets(token string, q model.TicketQuery) (model.TicketPage, error) {
+	u, err := l.user(token)
+	if err != nil {
+		return model.TicketPage{}, err
+	}
+	switch q.Status {
+	case "", model.TicketAll:
+		q.Status = model.TicketAll
+	case model.TicketActive, model.TicketInactive, model.TicketDeleted:
+	default:
+		return model.TicketPage{}, model.Invalid("Status tiket tidak valid")
+	}
+	if q.Category != "" && q.Category != model.CategoryTicket && q.Category != model.CategoryTopup {
+		return model.TicketPage{}, model.Invalid("Kategori tidak valid")
+	}
+	// Cashiers only ever see what they can sell.
+	if u.Role != model.RoleAdmin {
+		if q.Status == model.TicketDeleted {
+			return model.TicketPage{}, model.ErrForbidden
+		}
+		q.Status = model.TicketActive
+	}
+	if q.Page < 1 {
+		q.Page = 1
+	}
+	if q.PageSize < 1 {
+		q.PageSize = defaultPageSize
+	}
+	q.PageSize = min(q.PageSize, maxPageSize)
+	return l.Store.SearchTickets(q)
 }
 
 func (l *Local) SetTicketActive(token string, id int64, active bool) error {
@@ -371,20 +405,44 @@ func (l *Local) today() string {
 	return l.Store.Now().Format("2006-01-02")
 }
 
-func (l *Local) ListSales(token string, q model.SaleQuery) ([]model.Sale, error) {
+// salesScope applies the role rules to a sale query: cashiers only see their
+// own sales of today and never the deleted ones. It returns the user filter.
+func (l *Local) salesScope(token string, q *model.SaleQuery) (int64, error) {
 	u, err := l.user(token)
+	if err != nil {
+		return 0, err
+	}
+	if u.Role == model.RoleAdmin {
+		return 0, nil
+	}
+	if q.Deleted {
+		return 0, model.ErrForbidden
+	}
+	q.From, q.To = l.today(), l.today()
+	return u.ID, nil
+}
+
+func (l *Local) ListSales(token string, q model.SaleQuery) ([]model.Sale, error) {
+	userID, err := l.salesScope(token, &q)
 	if err != nil {
 		return nil, err
 	}
-	var userID int64
-	if u.Role != model.RoleAdmin {
-		if q.Deleted {
-			return nil, model.ErrForbidden
-		}
-		userID = u.ID
-		q.From, q.To = l.today(), l.today()
+	return l.Store.ListSales(q, userID)
+}
+
+func (l *Local) SearchSales(token string, q model.SalePageQuery) (model.SalePage, error) {
+	userID, err := l.salesScope(token, &q.SaleQuery)
+	if err != nil {
+		return model.SalePage{}, err
 	}
-	return l.Store.ListSales(q.From, q.To, userID, q.Deleted)
+	if q.Page < 1 {
+		q.Page = 1
+	}
+	if q.PageSize < 1 {
+		q.PageSize = defaultPageSize
+	}
+	q.PageSize = min(q.PageSize, maxPageSize)
+	return l.Store.SearchSales(q.SaleQuery, userID, q.Page, q.PageSize)
 }
 
 func (l *Local) DeleteSale(token string, in model.DeleteSaleInput) error {

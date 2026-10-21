@@ -46,6 +46,31 @@ type Ticket struct {
 	DeletedAt *string `json:"deletedAt"`
 }
 
+const (
+	TicketAll      = "all"
+	TicketActive   = "active"
+	TicketInactive = "inactive"
+	TicketDeleted  = "deleted"
+)
+
+// TicketQuery asks for one page of tickets. Status is one of the Ticket*
+// constants (empty means all non-deleted); Category is empty for both.
+type TicketQuery struct {
+	Search   string `json:"search"`
+	Category string `json:"category"`
+	Status   string `json:"status"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+// TicketPage is one page of tickets plus the number of all matches.
+type TicketPage struct {
+	Tickets  []Ticket `json:"tickets"`
+	Count    int64    `json:"count"`
+	Page     int      `json:"page"`
+	PageSize int      `json:"pageSize"`
+}
+
 type TicketInput struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
@@ -120,6 +145,23 @@ type SaleQuery struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Deleted bool   `json:"deleted"`
+	Search  string `json:"search"`
+}
+
+// SalePageQuery asks for one page of sales; Page starts at 1.
+type SalePageQuery struct {
+	SaleQuery
+	Page     int `json:"page"`
+	PageSize int `json:"pageSize"`
+}
+
+// SalePage is one page of sales plus the count and amount of every match.
+type SalePage struct {
+	Sales    []Sale `json:"sales"`
+	Count    int64  `json:"count"`
+	Amount   int64  `json:"amount"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
 }
 
 type DeleteSaleInput struct {

@@ -15,6 +15,7 @@
   async function login(e: SubmitEvent) {
     e.preventDefault()
     error = ''
+    if (busy) return
     busy = true
     try {
       session.user = await App.Login(username, password)

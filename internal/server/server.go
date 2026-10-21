@@ -53,7 +53,7 @@ type Empty struct{}
 const HeaderOpID = "X-Op-ID"
 
 var (
-	readRoutes  = map[string]bool{"me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
+	readRoutes  = map[string]bool{"searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
 	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted"}
 )
 
@@ -87,6 +87,8 @@ func summary(body []byte, out any) []any {
 		attrs = append(attrs, "invoice", o.InvoiceNo, "total", money.Format(o.Total))
 	case []model.Sale:
 		attrs = append(attrs, "count", len(o))
+	case model.SalePage:
+		attrs = append(attrs, "count", o.Count)
 	case model.Report:
 		attrs = append(attrs, "total", money.Format(o.Total))
 	case model.Ticket:
@@ -184,6 +186,9 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	route("listTickets", call(func(t string, in ListTicketsRequest) (any, error) {
 		return svc.ListTickets(t, in.Search, in.Deleted, in.ActiveOnly)
 	}))
+	route("searchTickets", call(func(t string, in model.TicketQuery) (any, error) {
+		return svc.SearchTickets(t, in)
+	}))
 	route("setTicketActive", call(func(t string, in SetActiveRequest) (any, error) {
 		return Empty{}, svc.SetTicketActive(t, in.ID, in.Active)
 	}))
@@ -213,6 +218,9 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	}))
 	route("listSales", call(func(t string, in model.SaleQuery) (any, error) {
 		return svc.ListSales(t, in)
+	}))
+	route("searchSales", call(func(t string, in model.SalePageQuery) (any, error) {
+		return svc.SearchSales(t, in)
 	}))
 	route("deleteSale", call(func(t string, in model.DeleteSaleInput) (any, error) {
 		return Empty{}, svc.DeleteSale(t, in)

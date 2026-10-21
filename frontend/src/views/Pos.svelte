@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import PaymentModal from './PaymentModal.svelte'
   import ReceiptModal from '../components/ReceiptModal.svelte'
+  import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
   import { colorClass } from '../lib/colors'
@@ -9,43 +11,96 @@
 
   type CartItem = { ticket: model.Ticket; qty: number }
 
+  // Products load page by page as the list is scrolled; search runs on the server.
+  const pageSize = 60
+
   let tickets = $state<model.Ticket[]>([])
+  let count = $state(0)
+  let page = $state(0)
   let search = $state('')
+  let appliedSearch = $state('')
   let loading = $state(true)
+  let loadingMore = $state(false)
+  let sentinelVisible = $state(false)
+  let requestSeq = 0
   let cart = $state<CartItem[]>([])
   let paying = $state(false)
   let saving = $state(false)
   let lastSaleId = $state<number | null>(null)
   let searchEl: HTMLInputElement
 
-  let filtered = $derived.by(() => {
-    const q = search.trim().toLowerCase()
-    return q ? tickets.filter((t) => t.name.toLowerCase().includes(q)) : tickets
-  })
+  let hasMore = $derived(tickets.length < count)
   let sections = $derived(
     [
-      { title: 'Daftar Tiket', items: filtered.filter((t) => t.category !== 'topup') },
-      { title: 'Topup Card', items: filtered.filter((t) => t.category === 'topup') }
+      { title: 'Daftar Tiket', items: tickets.filter((t) => t.category !== 'topup') },
+      { title: 'Topup Card', items: tickets.filter((t) => t.category === 'topup') }
     ].filter((s) => s.items.length > 0)
   )
   let total = $derived(cart.reduce((sum, c) => sum + c.ticket.price * c.qty, 0))
   let totalQty = $derived(cart.reduce((sum, c) => sum + c.qty, 0))
 
+  function fetchPage(p: number) {
+    return App.SearchTickets(model.TicketQuery.createFrom({ search: appliedSearch, status: 'active', page: p, pageSize }))
+  }
+
+  // load starts the list again from the first page.
   async function load() {
+    const seq = ++requestSeq
     loading = true
     try {
-      tickets = await App.ListTickets('', false, true)
-      cart = cart.filter((c) => tickets.some((t) => t.id === c.ticket.id))
+      const out = await fetchPage(1)
+      if (seq !== requestSeq) return
+      tickets = out.tickets
+      count = out.count
+      page = 1
+    } catch (e) {
+      if (seq === requestSeq) handleError(e)
+    } finally {
+      if (seq === requestSeq) loading = false
+    }
+  }
+
+  async function loadMore() {
+    const seq = requestSeq
+    loadingMore = true
+    try {
+      const out = await fetchPage(page + 1)
+      if (seq !== requestSeq) return
+      const seen = new Set(tickets.map((t) => t.id))
+      tickets = [...tickets, ...out.tickets.filter((t) => !seen.has(t.id))]
+      count = out.count
+      page += 1
     } catch (e) {
       handleError(e)
     } finally {
-      loading = false
+      loadingMore = false
     }
   }
 
   $effect(() => {
-    load()
+    const value = search.trim()
+    const timer = setTimeout(() => (appliedSearch = value), 250)
+    return () => clearTimeout(timer)
   })
+
+  $effect(() => {
+    appliedSearch
+    untrack(load)
+  })
+
+  // Keep loading while the end of the list is on screen.
+  $effect(() => {
+    if (sentinelVisible && hasMore && !loading && !loadingMore) loadMore()
+  })
+
+  function watchEnd(node: HTMLElement) {
+    const observer = new IntersectionObserver(([entry]) => (sentinelVisible = entry.isIntersecting), {
+      root: node.closest('.overflow-y-auto'),
+      rootMargin: '300px'
+    })
+    observer.observe(node)
+    return { destroy: () => observer.disconnect() }
+  }
 
   function add(t: model.Ticket) {
     const item = cart.find((c) => c.ticket.id === t.id)
@@ -61,14 +116,22 @@
     item.qty = Math.min(Math.floor(qty), 10000)
   }
 
-  function onSearchKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && filtered.length === 1) {
-      add(filtered[0])
+  // Enter adds the product when the search leaves exactly one.
+  async function onSearchKey(e: KeyboardEvent) {
+    if (e.key !== 'Enter') return
+    if (appliedSearch !== search.trim()) {
+      appliedSearch = search.trim()
+      await load()
+    }
+    if (count === 1 && tickets.length === 1) {
+      add(tickets[0])
       search = ''
     }
   }
 
   async function pay(paid: number) {
+    // Guards against a second submit before the first sale is saved.
+    if (saving) return
     saving = true
     try {
       const items = cart.map((c) => model.SaleItemInput.createFrom({ ticketId: c.ticket.id, qty: c.qty }))
@@ -78,7 +141,7 @@
       lastSaleId = sale.id
     } catch (e) {
       handleError(e)
-      if (String(e).includes('Tiket tidak ditemukan')) load()
+      if (String(e).includes('Tiket tidak ditemukan') || String(e).includes('non-aktif')) load()
     } finally {
       saving = false
     }
@@ -122,11 +185,12 @@
       </button>
     </div>
 
-    <div class="card mt-4 min-h-0 flex-1 overflow-y-auto p-3">
-      {#if loading}
-        <p class="py-10 text-center text-slate-500">Memuat tiket…</p>
-      {:else if filtered.length === 0}
-        <p class="py-10 text-center text-slate-500">{tickets.length === 0 ? 'Belum ada tiket. Admin bisa menambah tiket di menu Tiket.' : 'Tiket tidak ditemukan.'}</p>
+    <div class="relative mt-4 flex min-h-0 flex-1 flex-col">
+    <div class="card min-h-40 flex-1 overflow-y-auto p-3">
+      {#if tickets.length === 0}
+        {#if !loading}
+          <p class="py-10 text-center text-slate-500">{appliedSearch ? 'Tiket tidak ditemukan.' : 'Belum ada tiket. Admin bisa menambah tiket di menu Tiket.'}</p>
+        {/if}
       {:else}
         {#each sections as section, i (section.title)}
           <h2 class="mb-2 font-semibold text-brand-700 {i > 0 ? 'mt-5' : ''}">{section.title}</h2>
@@ -142,7 +206,17 @@
             {/each}
           </div>
         {/each}
+        <div use:watchEnd class="flex items-center justify-center gap-2 py-3 text-sm text-slate-400">
+          {#if loadingMore}
+            <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600"></span>
+            Memuat tiket berikutnya…
+          {:else if hasMore}
+            {tickets.length} dari {count} tiket
+          {/if}
+        </div>
       {/if}
+    </div>
+    <LoadingOverlay show={loading} text="Memuat tiket…" />
     </div>
   </section>
 

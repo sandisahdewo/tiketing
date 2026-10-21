@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"log/slog"
@@ -561,4 +562,118 @@ func TestTicketActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
+}
+
+func TestSearchSales(t *testing.T) {
+	local, c := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 50%", Price: 5000000, Category: model.CategoryTopup}))
+
+	c.t = time.Date(2026, 10, 4, 9, 0, 0, 0, time.Local)
+	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000}))
+	c.t = time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)
+	var sales []model.Sale
+	for i := 0; i < 7; i++ {
+		sales = append(sales, must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000})))
+	}
+	withTopup := must(svc.CreateSale(admin, model.SaleInput{Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
+
+	month := model.SaleQuery{From: "2026-10-01", To: "2026-10-31"}
+	p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: month, Page: 2, PageSize: 3}))
+	if p.Count != 9 || p.Amount != 8*1000000+5000000 || p.Page != 2 || len(p.Sales) != 3 || p.Sales[0].ID != sales[4].ID || len(p.Sales[0].Items) != 1 {
+		t.Errorf("page 2 wrong: count=%d amount=%d page=%d ids=%v", p.Count, p.Amount, p.Page, len(p.Sales))
+	}
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: month, Page: 9, PageSize: 3})); p.Count != 9 || len(p.Sales) != 0 {
+		t.Errorf("page past the end: %+v", p)
+	}
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: month})); p.PageSize != 100 || p.Page != 1 {
+		t.Errorf("defaults: page=%d size=%d", p.Page, p.PageSize)
+	}
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: month, PageSize: 10000})); p.PageSize != 500 {
+		t.Errorf("page size not capped: %d", p.PageSize)
+	}
+
+	for search, want := range map[string]int64{
+		"topup 50%":             1, // item name, case-insensitive; % is literal
+		withTopup.InvoiceNo[3:]: 1, // part of the invoice number
+		"budi":                  8, // cashier
+		"loket":                 0, // terminal is "-" in tests
+		"tidak ada":             0,
+	} {
+		q := month
+		q.Search = search
+		if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: q})); p.Count != want {
+			t.Errorf("search %q: got %d, want %d", search, p.Count, want)
+		}
+	}
+
+	// Cashiers get their own sales of today only.
+	if p := must(svc.SearchSales(kasir, model.SalePageQuery{SaleQuery: month})); p.Count != 7 {
+		t.Errorf("kasir should see own sales of today: %d", p.Count)
+	}
+	if _, err := svc.SearchSales(kasir, model.SalePageQuery{SaleQuery: model.SaleQuery{From: "2026-10-05", To: "2026-10-05", Deleted: true}}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not search deleted sales: %v", err)
+	}
+}
+
+func TestSearchTickets(t *testing.T) {
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+
+	var ids []int64
+	for i := 0; i < 12; i++ {
+		cat := model.CategoryTicket
+		if i >= 8 {
+			cat = model.CategoryTopup
+		}
+		ids = append(ids, must(svc.SaveTicket(admin, model.TicketInput{Name: fmt.Sprintf("Item %02d", i), Price: 100000, Category: cat})).ID)
+	}
+	must(0, svc.SetTicketActive(admin, ids[1], false))
+	must(0, svc.SetTicketActive(admin, ids[9], false))
+	must(0, svc.DeleteTicket(admin, ids[2]))
+
+	count := func(token string, q model.TicketQuery) int64 {
+		t.Helper()
+		return must(svc.SearchTickets(token, q)).Count
+	}
+	for _, tc := range []struct {
+		q    model.TicketQuery
+		want int64
+	}{
+		{model.TicketQuery{}, 11},
+		{model.TicketQuery{Status: model.TicketActive}, 9},
+		{model.TicketQuery{Status: model.TicketInactive}, 2},
+		{model.TicketQuery{Status: model.TicketDeleted}, 1},
+		{model.TicketQuery{Category: model.CategoryTopup}, 4},
+		{model.TicketQuery{Category: model.CategoryTopup, Status: model.TicketActive}, 3},
+		{model.TicketQuery{Search: "item 1"}, 2},
+	} {
+		if got := count(admin, tc.q); got != tc.want {
+			t.Errorf("admin %+v: got %d, want %d", tc.q, got, tc.want)
+		}
+	}
+
+	// Pages follow the cashier screen order: tickets first, then topups.
+	p := must(svc.SearchTickets(admin, model.TicketQuery{Page: 3, PageSize: 4}))
+	if p.Count != 11 || len(p.Tickets) != 3 || p.Tickets[0].Name != "Item 09" || p.Tickets[0].Category != model.CategoryTopup {
+		t.Errorf("page 3 wrong: %+v", p)
+	}
+
+	// Cashiers only get active tickets, whatever they ask for.
+	if got := count(kasir, model.TicketQuery{Status: model.TicketInactive}); got != 9 {
+		t.Errorf("kasir should only see active tickets, got %d", got)
+	}
+	if _, err := svc.SearchTickets(kasir, model.TicketQuery{Status: model.TicketDeleted}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not see deleted tickets: %v", err)
+	}
+	if _, err := svc.SearchTickets(admin, model.TicketQuery{Status: "x"}); err == nil {
+		t.Error("invalid status accepted")
+	}
 }

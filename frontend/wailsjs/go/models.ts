@@ -290,10 +290,71 @@ export namespace model {
 	        this.qty = source["qty"];
 	    }
 	}
+	export class SalePage {
+	    sales: Sale[];
+	    count: number;
+	    amount: number;
+	    page: number;
+	    pageSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SalePage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sales = this.convertValues(source["sales"], Sale);
+	        this.count = source["count"];
+	        this.amount = source["amount"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SalePageQuery {
+	    from: string;
+	    to: string;
+	    deleted: boolean;
+	    search: string;
+	    page: number;
+	    pageSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SalePageQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.deleted = source["deleted"];
+	        this.search = source["search"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	}
 	export class SaleQuery {
 	    from: string;
 	    to: string;
 	    deleted: boolean;
+	    search: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleQuery(source);
@@ -304,6 +365,7 @@ export namespace model {
 	        this.from = source["from"];
 	        this.to = source["to"];
 	        this.deleted = source["deleted"];
+	        this.search = source["search"];
 	    }
 	}
 	export class Settings {
@@ -390,6 +452,62 @@ export namespace model {
 	        this.price = source["price"];
 	        this.category = source["category"];
 	        this.color = source["color"];
+	    }
+	}
+	export class TicketPage {
+	    tickets: Ticket[];
+	    count: number;
+	    page: number;
+	    pageSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TicketPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tickets = this.convertValues(source["tickets"], Ticket);
+	        this.count = source["count"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TicketQuery {
+	    search: string;
+	    category: string;
+	    status: string;
+	    page: number;
+	    pageSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TicketQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.search = source["search"];
+	        this.category = source["category"];
+	        this.status = source["status"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
 	    }
 	}
 	export class User {

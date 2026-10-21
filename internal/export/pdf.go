@@ -144,7 +144,15 @@ func PDF(d Data) ([]byte, error) {
 	}
 	t.row(true, "Total", n(r.Qty), money.Format(r.Total))
 
-	section(p, tr, "Daftar transaksi ("+strconv.Itoa(len(d.Sales))+")")
+	count := max(d.SalesCount, int64(len(d.Sales)))
+	section(p, tr, "Daftar transaksi ("+strconv.FormatInt(count, 10)+")")
+	if count > PDFMaxSales {
+		p.SetFont("Helvetica", "", 10)
+		p.MultiCell(0, 6, tr(fmt.Sprintf(
+			"Terlalu banyak untuk dicetak (lebih dari %d transaksi). Daftar lengkap ada di Export Excel, atau pilih rentang tanggal yang lebih pendek.",
+			PDFMaxSales)), "", "L", false)
+		return output(p)
+	}
 	t = newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Loket", "Total (Rp)"}, []float64{32, 44, 38, 30, 36}, "LLLLR")
 	var total int64
 	for _, s := range d.Sales {
@@ -152,7 +160,10 @@ func PDF(d Data) ([]byte, error) {
 		total += s.Total
 	}
 	t.row(true, "Total", "", "", "", money.Format(total))
+	return output(p)
+}
 
+func output(p *fpdf.Fpdf) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := p.Output(&buf); err != nil {
 		return nil, err

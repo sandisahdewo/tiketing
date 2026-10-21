@@ -89,3 +89,32 @@ func TestPeriodLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestPDFOmitsLongSalesList(t *testing.T) {
+	small, err := PDF(sample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := sample()
+	for len(full.Sales) < PDFMaxSales {
+		full.Sales = append(full.Sales, full.Sales[0])
+	}
+	listed, err := PDF(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) < len(small)+20000 {
+		t.Fatalf("%d transactions should still be listed: %d vs %d bytes", PDFMaxSales, len(listed), len(small))
+	}
+
+	big := sample()
+	big.Sales = nil
+	big.SalesCount = PDFMaxSales + 1
+	omitted, err := PDF(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(omitted) > len(small)+5000 {
+		t.Errorf("list above %d should be omitted: %d vs %d bytes", PDFMaxSales, len(omitted), len(small))
+	}
+}

@@ -7,6 +7,7 @@
 
   async function install() {
     error = ''
+    if (updateState.installing) return
     updateState.installing = true
     try {
       await App.ApplyUpdate()

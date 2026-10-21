@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import Modal from '../components/Modal.svelte'
+  import Pager from '../components/Pager.svelte'
+  import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import MoneyInput from '../components/MoneyInput.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
@@ -7,8 +10,14 @@
   import { formatDateTime } from '../lib/date'
   import { toast } from '../lib/toast.svelte'
 
-  let tickets = $state<model.Ticket[]>([])
+  const pageSize = 50
+
+  let result = $state<model.TicketPage | null>(null)
+  let tickets = $derived(result?.tickets ?? [])
+  let page = $state(1)
   let search = $state('')
+  let appliedSearch = $state('')
+  let requestSeq = 0
   type Status = 'all' | 'active' | 'inactive' | 'deleted'
   const statuses: { value: Status; label: string }[] = [
     { value: 'all', label: 'Semua' },
@@ -22,36 +31,55 @@
   let category = $state('')
   let loading = $state(true)
 
-  let visible = $derived(
-    tickets.filter(
-      (t) =>
-        (!category || t.category === category) &&
-        (status === 'active' ? t.active : status === 'inactive' ? !t.active : true)
-    )
-  )
 
   let editing = $state<{ id: number; name: string; price: number | null; category: string; color: string } | null>(null)
   let formError = $state('')
   let saving = $state(false)
   let confirmDelete = $state<model.Ticket | null>(null)
   let confirmActive = $state<model.Ticket | null>(null)
+  // A delete, (de)activation or restore is in progress; blocks repeat clicks.
+  let busy = $state(false)
 
+  // Filters, search and paging run on the server.
   async function load() {
+    const seq = ++requestSeq
     loading = true
     try {
-      tickets = await App.ListTickets(search, showDeleted, false)
+      const out = await App.SearchTickets(model.TicketQuery.createFrom({ search: appliedSearch, category, status, page, pageSize }))
+      if (seq !== requestSeq) return
+      // The last page can empty out after a delete or status change.
+      if (out.tickets.length === 0 && out.count > 0 && page > 1) {
+        page = Math.ceil(out.count / pageSize)
+        return load()
+      }
+      result = out
     } catch (e) {
-      handleError(e)
+      if (seq === requestSeq) handleError(e)
     } finally {
-      loading = false
+      if (seq === requestSeq) loading = false
     }
   }
 
+  function goto(p: number) {
+    page = p
+    load()
+  }
+
   $effect(() => {
-    showDeleted
-    const timer = setTimeout(load, 200)
-    search
+    const value = search.trim()
+    const timer = setTimeout(() => (appliedSearch = value), 250)
     return () => clearTimeout(timer)
+  })
+
+  // New filters start again from page 1.
+  $effect(() => {
+    appliedSearch
+    category
+    status
+    untrack(() => {
+      page = 1
+      load()
+    })
   })
 
   function openForm(t?: model.Ticket) {
@@ -63,7 +91,7 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || saving) return
     if (editing.price == null) {
       formError = 'Harga wajib diisi dengan angka yang valid'
       return
@@ -83,7 +111,8 @@
   }
 
   async function remove() {
-    if (!confirmDelete) return
+    if (!confirmDelete || busy) return
+    busy = true
     try {
       await App.DeleteTicket(confirmDelete.id)
       toast('Tiket dihapus')
@@ -91,12 +120,15 @@
       load()
     } catch (e) {
       handleError(e)
+    } finally {
+      busy = false
     }
   }
 
   async function toggleActive() {
-    if (!confirmActive) return
+    if (!confirmActive || busy) return
     const t = confirmActive
+    busy = true
     try {
       await App.SetTicketActive(t.id, !t.active)
       toast(`${t.name} ${t.active ? 'dinon-aktifkan' : 'diaktifkan'}`)
@@ -104,16 +136,22 @@
       load()
     } catch (e) {
       handleError(e)
+    } finally {
+      busy = false
     }
   }
 
   async function restore(t: model.Ticket) {
+    if (busy) return
+    busy = true
     try {
       await App.RestoreTicket(t.id)
       toast('Tiket dipulihkan')
       load()
     } catch (e) {
       handleError(e)
+    } finally {
+      busy = false
     }
   }
 </script>
@@ -138,7 +176,8 @@
     </div>
   </div>
 
-  <div class="card mt-4 min-h-0 flex-1 overflow-y-auto">
+  <div class="relative mt-4 flex min-h-0 flex-1 flex-col">
+  <div class="card min-h-40 flex-1 overflow-y-auto">
     <table class="table">
       <thead class="sticky top-0">
         <tr>
@@ -153,12 +192,10 @@
         </tr>
       </thead>
       <tbody>
-        {#if loading && tickets.length === 0}
-          <tr><td colspan="7" class="py-10 text-center text-slate-500">Memuat…</td></tr>
-        {:else if visible.length === 0}
-          <tr><td colspan="7" class="py-10 text-center text-slate-500">{showDeleted ? 'Tidak ada tiket terhapus.' : status === 'inactive' ? 'Tidak ada tiket non-aktif.' : 'Belum ada tiket.'}</td></tr>
+        {#if !loading && tickets.length === 0}
+          <tr><td colspan="7" class="py-10 text-center text-slate-500">{appliedSearch || category ? 'Tiket tidak ditemukan.' : showDeleted ? 'Tidak ada tiket terhapus.' : status === 'inactive' ? 'Tidak ada tiket non-aktif.' : status === 'active' ? 'Tidak ada tiket aktif.' : 'Belum ada tiket.'}</td></tr>
         {/if}
-        {#each visible as t (t.id)}
+        {#each tickets as t (t.id)}
           <tr class="hover:bg-slate-50 {!showDeleted && !t.active ? 'text-slate-400' : ''}">
             <td class="font-medium">
               <span class="inline-flex items-center gap-2"><span class="h-3.5 w-3.5 shrink-0 rounded-sm {colorClass(t.color)} {!showDeleted && !t.active ? 'opacity-40' : ''}"></span>{t.name}</span>
@@ -179,7 +216,7 @@
             {#if showDeleted}<td class="text-slate-500">{formatDateTime(t.deletedAt)}</td>{/if}
             <td class="text-right">
               {#if showDeleted}
-                <button class="btn btn-secondary px-3 py-1" onclick={() => restore(t)}>Pulihkan</button>
+                <button class="btn btn-secondary px-3 py-1" onclick={() => restore(t)} disabled={busy}>Pulihkan</button>
               {:else}
                 <button class="btn btn-ghost px-3 py-1" onclick={() => (confirmActive = t)}>{t.active ? 'Non-aktifkan' : 'Aktifkan'}</button>
                 <button class="btn btn-secondary px-3 py-1" onclick={() => openForm(t)}>Ubah</button>
@@ -191,6 +228,11 @@
       </tbody>
     </table>
   </div>
+  <LoadingOverlay show={loading} />
+  </div>
+  {#if result}
+    <Pager {page} {pageSize} count={result.count} {loading} ongoto={goto} />
+  {/if}
 </div>
 
 {#if editing}
@@ -245,7 +287,7 @@
     <p>Hapus tiket <b>{confirmDelete.name}</b>? Tiket tidak akan muncul di kasir, tapi riwayat penjualan tetap tersimpan. Tiket bisa dipulihkan dari tab Terhapus. Kalau hanya ingin berhenti dijual sementara, pakai <b>Non-aktifkan</b>.</p>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmDelete = null)}>Batal</button>
-      <button class="btn btn-danger" onclick={remove}>Hapus</button>
+      <button class="btn btn-danger" onclick={remove} disabled={busy}>{busy ? 'Menghapus…' : 'Hapus'}</button>
     {/snippet}
   </Modal>
 {/if}
@@ -259,7 +301,7 @@
     {/if}
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmActive = null)}>Batal</button>
-      <button class="btn {confirmActive?.active ? 'btn-danger' : 'btn-primary'}" onclick={toggleActive}>{confirmActive?.active ? 'Non-aktifkan' : 'Aktifkan'}</button>
+      <button class="btn {confirmActive?.active ? 'btn-danger' : 'btn-primary'}" onclick={toggleActive} disabled={busy}>{busy ? 'Menyimpan…' : confirmActive?.active ? 'Non-aktifkan' : 'Aktifkan'}</button>
     {/snippet}
   </Modal>
 {/if}

@@ -15,6 +15,7 @@
   async function test() {
     error = ''
     testResult = ''
+    if (busy) return
     busy = true
     try {
       const st = await App.TestServer(serverUrl)
@@ -29,6 +30,7 @@
   async function save(e: SubmitEvent) {
     e.preventDefault()
     error = ''
+    if (busy) return
     busy = true
     try {
       if (mode === 'server') {

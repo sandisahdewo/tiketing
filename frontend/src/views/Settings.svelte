@@ -36,6 +36,7 @@
   }
 
   async function chooseLogo() {
+    if (logoBusy) return
     logoBusy = true
     try {
       if (await App.ChooseLogo()) {
@@ -51,6 +52,7 @@
   }
 
   async function removeLogo() {
+    if (logoBusy) return
     logoBusy = true
     try {
       await App.RemoveLogo()
@@ -80,7 +82,10 @@
       .catch(handleError)
   })
 
+  // Saving and test printing both write the local settings, so they share
+  // savingLocal and each blocks the other.
   async function saveLocal() {
+    if (savingLocal) return
     savingLocal = true
     try {
       await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
@@ -93,17 +98,24 @@
     }
   }
 
+  let testPrinting = $state(false)
+
   async function testPrint() {
+    if (savingLocal) return
+    savingLocal = testPrinting = true
     try {
       await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
       toast(await App.PrintTest())
     } catch (e) {
       handleError(e)
+    } finally {
+      savingLocal = testPrinting = false
     }
   }
 
   async function saveBusiness(e: SubmitEvent) {
     e.preventDefault()
+    if (savingBusiness) return
     savingBusiness = true
     try {
       await App.SaveSettings(business)
@@ -116,6 +128,7 @@
   }
 
   async function checkUpdate() {
+    if (checking) return
     checking = true
     updateMessage = ''
     try {
@@ -132,11 +145,16 @@
     }
   }
 
+  let resetting = $state(false)
+
   async function resetMode() {
+    if (resetting) return
+    resetting = true
     try {
       await App.ResetSetup()
       onreset()
     } catch (e) {
+      resetting = false
       handleError(e)
     }
   }
@@ -176,8 +194,8 @@
           </div>
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-primary" onclick={saveLocal} disabled={savingLocal}>Simpan</button>
-          <button class="btn btn-secondary" onclick={testPrint}>Cetak Tes</button>
+          <button class="btn btn-primary" onclick={saveLocal} disabled={savingLocal}>{savingLocal && !testPrinting ? 'Menyimpan…' : 'Simpan'}</button>
+          <button class="btn btn-secondary" onclick={testPrint} disabled={savingLocal}>{testPrinting ? 'Mencetak…' : 'Cetak Tes'}</button>
         </div>
       </div>
     </section>
@@ -255,7 +273,7 @@
               <p class="mt-1 text-xs text-slate-500">Sabtu–Minggu</p>
             </div>
           </div>
-          <button class="btn btn-primary" disabled={savingBusiness}>Simpan</button>
+          <button class="btn btn-primary" disabled={savingBusiness}>{savingBusiness ? 'Menyimpan…' : 'Simpan'}</button>
         </form>
       </section>
     {/if}
@@ -278,7 +296,7 @@
     {#if info.mode === 'server'}<p class="mt-2 text-sm text-red-700">Komputer client tidak bisa terhubung selama server dimatikan.</p>{/if}
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmReset = false)}>Batal</button>
-      <button class="btn btn-danger" onclick={resetMode}>Lanjutkan</button>
+      <button class="btn btn-danger" onclick={resetMode} disabled={resetting}>{resetting ? 'Memproses…' : 'Lanjutkan'}</button>
     {/snippet}
   </Modal>
 {/if}

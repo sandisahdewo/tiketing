@@ -41,7 +41,11 @@
     }
   }
 
+  let resetting = false
+
   async function resetSetup() {
+    if (resetting) return
+    resetting = true
     confirmReset = false
     try {
       await App.ResetSetup()
@@ -50,6 +54,8 @@
     } catch (e) {
       error = errorMessage(e)
       screen = 'error'
+    } finally {
+      resetting = false
     }
   }
 

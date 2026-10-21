@@ -8,13 +8,20 @@ import (
 	"tiket/internal/model"
 )
 
-// Data is everything a report export needs.
+// PDFMaxSales is the most transactions listed in a PDF; above it the PDF only
+// carries the summaries and points to the Excel export for the full list.
+const PDFMaxSales = 1000
+
+// Data is everything a report export needs. SalesCount is the number of
+// transactions in the range; Sales may be left empty when it exceeds
+// PDFMaxSales and only a PDF is made.
 type Data struct {
-	Settings  model.Settings
-	Report    model.Report
-	Sales     []model.Sale
-	PrintedBy string
-	PrintedAt time.Time
+	Settings   model.Settings
+	Report     model.Report
+	Sales      []model.Sale
+	SalesCount int64
+	PrintedBy  string
+	PrintedAt  time.Time
 }
 
 var (

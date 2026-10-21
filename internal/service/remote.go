@@ -12,9 +12,9 @@ import (
 )
 
 type Remote struct {
-	BaseURL   string
-	Version   string
-	Client    *http.Client
+	BaseURL string
+	Version string
+	Client  *http.Client
 	OpID    string
 }
 
@@ -158,6 +158,11 @@ func (r *Remote) RestoreTicket(token string, id int64) error {
 	return r.call("restoreTicket", token, idRequest{id}, nil)
 }
 
+func (r *Remote) SearchTickets(token string, q model.TicketQuery) (model.TicketPage, error) {
+	var out model.TicketPage
+	return out, r.call("searchTickets", token, q, &out)
+}
+
 func (r *Remote) SetTicketActive(token string, id int64, active bool) error {
 	return r.call("setTicketActive", token, map[string]any{"id": id, "active": active}, nil)
 }
@@ -189,6 +194,11 @@ func (r *Remote) GetSale(token string, id int64) (model.Sale, error) {
 func (r *Remote) ListSales(token string, q model.SaleQuery) ([]model.Sale, error) {
 	var out []model.Sale
 	return out, r.call("listSales", token, q, &out)
+}
+
+func (r *Remote) SearchSales(token string, q model.SalePageQuery) (model.SalePage, error) {
+	var out model.SalePage
+	return out, r.call("searchSales", token, q, &out)
 }
 
 func (r *Remote) DeleteSale(token string, in model.DeleteSaleInput) error {

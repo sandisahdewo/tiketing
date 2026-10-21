@@ -3,7 +3,7 @@
   import ReceiptModal from './ReceiptModal.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatRp } from '../lib/money'
-  import { formatDateTime, formatTime } from '../lib/date'
+  import { formatDateTime } from '../lib/date'
   import { categoryLabel } from '../lib/colors'
   import { toast } from '../lib/toast.svelte'
   import { isAdmin } from '../lib/session.svelte'
@@ -12,22 +12,17 @@
   let {
     sales,
     expanded = $bindable({}),
-    timeOnly = false,
-    showTotal = true,
     empty = 'Tidak ada transaksi.',
     ondeleted
   }: {
     sales: model.Sale[]
     expanded?: Record<number, boolean>
-    timeOnly?: boolean
-    showTotal?: boolean
     empty?: string
     ondeleted?: () => void
   } = $props()
 
   const admin = isAdmin()
 
-  let total = $derived(sales.reduce((sum, s) => sum + s.total, 0))
   let selectedSale = $state<number | null>(null)
 
   let deleting = $state<model.Sale | null>(null)
@@ -41,7 +36,7 @@
 
   async function removeSale(e: SubmitEvent) {
     e.preventDefault()
-    if (!deleting) return
+    if (!deleting || deleteBusy) return
     deleteBusy = true
     try {
       await App.DeleteSale(deleting.id, deleteReason)
@@ -57,12 +52,12 @@
 </script>
 
 <table class="table">
-  <thead class="sticky top-0"><tr><th class="w-8"></th><th>{timeOnly ? 'Jam' : 'Waktu'}</th><th>No. Nota</th><th>Kasir</th><th>Loket</th><th class="text-right">Total</th><th class="text-center">Cetak</th><th></th></tr></thead>
+  <thead class="sticky top-0"><tr><th class="w-8"></th><th>Waktu</th><th>No. Nota</th><th>Kasir</th><th>Loket</th><th class="text-right">Total</th><th class="text-center">Cetak</th><th></th></tr></thead>
   <tbody>
     {#each sales as s (s.id)}
       <tr class="cursor-pointer hover:bg-slate-50 {s.deletedAt ? 'text-slate-400' : ''}" onclick={() => (expanded[s.id] = !expanded[s.id])}>
         <td class="text-slate-400">{expanded[s.id] ? '▾' : '▸'}</td>
-        <td>{timeOnly ? formatTime(s.createdAt) : formatDateTime(s.createdAt)}</td>
+        <td>{formatDateTime(s.createdAt)}</td>
         <td class="font-mono {s.deletedAt ? 'line-through' : ''}">{s.invoiceNo}</td>
         <td>{s.cashierName}</td>
         <td>{s.terminal}</td>
@@ -118,11 +113,6 @@
       <tr><td colspan="8" class="py-10 text-center text-slate-500">{empty}</td></tr>
     {/each}
   </tbody>
-  {#if sales.length > 0 && showTotal}
-    <tfoot>
-      <tr><td></td><td colspan="4" class="font-semibold">{sales.length} transaksi</td><td class="text-right font-bold">{formatRp(total)}</td><td colspan="2"></td></tr>
-    </tfoot>
-  {/if}
 </table>
 
 {#if selectedSale !== null}

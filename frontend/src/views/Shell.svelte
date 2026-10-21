@@ -1,6 +1,5 @@
 <script lang="ts">
   import Pos from './Pos.svelte'
-  import History from './History.svelte'
   import Tickets from './Tickets.svelte'
   import Users from './Users.svelte'
   import Reports from './Reports.svelte'
@@ -13,11 +12,10 @@
 
   let { onlogout, onreset }: { onlogout: () => void; onreset: () => void } = $props()
 
-  type View = 'pos' | 'history' | 'tickets' | 'users' | 'reports' | 'settings'
+  type View = 'pos' | 'tickets' | 'users' | 'reports' | 'settings'
 
   const nav: { view: View; label: string; admin: boolean }[] = [
     { view: 'pos', label: 'Kasir', admin: false },
-    { view: 'history', label: 'Riwayat', admin: false },
     { view: 'tickets', label: 'Tiket', admin: true },
     { view: 'users', label: 'Pengguna', admin: true },
     { view: 'reports', label: 'Laporan', admin: false },
@@ -25,6 +23,13 @@
   ]
 
   let view = $state<View>('pos')
+  // Set when the cashier screen opens Laporan on today's transactions.
+  let reportsToday = $state(false)
+
+  function show(v: View, today = false) {
+    reportsToday = today
+    view = v
+  }
   let now = $state(new Date())
 
   $effect(() => {
@@ -38,7 +43,11 @@
       .catch(() => {})
   })
 
+  let loggingOut = $state(false)
+
   async function logout() {
+    if (loggingOut) return
+    loggingOut = true
     await App.Logout()
     session.user = null
     onlogout()
@@ -52,7 +61,7 @@
       {#each nav.filter((n) => !n.admin || isAdmin()) as n}
         <button
           class="border-b-4 px-4 text-sm font-semibold transition {view === n.view ? 'border-white bg-brand-700' : 'border-transparent hover:bg-brand-700/60'}"
-          onclick={() => (view = n.view)}
+          onclick={() => show(n.view)}
         >
           {n.label}
         </button>
@@ -65,7 +74,7 @@
         <b>{session.user?.fullName}</b>
         <span class="opacity-75">({session.user?.role === 'admin' ? 'Admin' : 'Kasir'})</span>
       </span>
-      <button class="rounded px-3 py-1.5 font-semibold hover:bg-brand-700" onclick={logout}>Keluar</button>
+      <button class="rounded px-3 py-1.5 font-semibold hover:bg-brand-700" onclick={logout} disabled={loggingOut}>Keluar</button>
     </div>
   </header>
 
@@ -73,15 +82,13 @@
 
   <main class="min-h-0 flex-1">
     {#if view === 'pos'}
-      <Pos onhistory={() => (view = 'history')} />
-    {:else if view === 'history'}
-      <History />
+      <Pos onhistory={() => show('reports', true)} />
     {:else if view === 'tickets'}
       <Tickets />
     {:else if view === 'users'}
       <Users />
     {:else if view === 'reports'}
-      <Reports />
+      <Reports todaySales={reportsToday} />
     {:else}
       <Settings {onreset} />
     {/if}

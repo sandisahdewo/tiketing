@@ -1,5 +1,8 @@
 <script lang="ts">
-  import SalesTable from '../components/SalesTable.svelte'
+  import { untrack } from 'svelte'
+  import SalesBrowser from '../components/SalesBrowser.svelte'
+  import Pager from '../components/Pager.svelte'
+  import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatRp } from '../lib/money'
   import { formatDate, formatPeriod, toISODate, today } from '../lib/date'
@@ -9,6 +12,12 @@
 
   // Cashiers only get today's report of their own sales; the server enforces this too.
   const admin = isAdmin()
+
+  // todaySales opens the transaction list of today (the cashier's "Riwayat hari ini").
+  let { todaySales = false }: { todaySales?: boolean } = $props()
+  // Only decides how the page opens; later changes don't matter.
+  const openToday = untrack(() => todaySales)
+
 
   type Period = 'daily' | 'weekly' | 'monthly'
 
@@ -24,20 +33,14 @@
   }
 
   let period = $state<Period>('daily')
-  let from = $state(startOfMonth())
+  let from = $state(openToday ? today() : startOfMonth())
   let to = $state(today())
   let report = $state<model.Report | null>(null)
-  let sales = $state<model.Sale[]>([])
   let loading = $state(false)
-  let tab = $state<'period' | 'ticket' | 'sales'>(admin ? 'period' : 'sales')
+  let tab = $state<'period' | 'ticket' | 'sales'>(admin && !openToday ? 'period' : 'sales')
   let showDeleted = $state(false)
-  let expanded = $state<Record<number, boolean>>({})
-  let allExpanded = $derived(sales.length > 0 && sales.every((s) => expanded[s.id]))
-
-  function toggleAll() {
-    const open = !allExpanded
-    expanded = Object.fromEntries(sales.map((s) => [s.id, open]))
-  }
+  // Bumped on every "Tampilkan" so the transaction list reloads too.
+  let salesRefresh = $state(0)
 
   let itemGroups = $derived(
     categories
@@ -53,12 +56,22 @@
       .filter((g) => g.items.length > 0)
   )
 
+  // "Per periode" and "Per item" come whole with the report (at most one row
+  // per period and per product), so they are paged here on screen.
+  const tabPageSize = 50
+  let periodPage = $state(1)
+  let itemPage = $state(1)
+  let periodRows = $derived(report?.rows.slice((periodPage - 1) * tabPageSize, periodPage * tabPageSize) ?? [])
+  let itemRows = $derived(
+    itemGroups.flatMap((g) => g.items.map((item, i) => ({ item, group: g, first: i === 0, last: i === g.items.length - 1 })))
+  )
+  let itemPageRows = $derived(itemRows.slice((itemPage - 1) * tabPageSize, itemPage * tabPageSize))
+
   function preset(kind: string) {
-    const now = new Date()
     if (kind === 'today') {
       from = to = today()
     } else if (kind === 'week') {
-      const d = new Date(now)
+      const d = new Date()
       d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
       from = toISODate(d)
       to = today()
@@ -66,22 +79,21 @@
       from = startOfMonth()
       to = today()
     } else if (kind === 'year') {
-      from = `${now.getFullYear()}-01-01`
+      from = `${new Date().getFullYear()}-01-01`
       to = today()
     }
     load()
   }
 
-  async function load() {
+  // reloadSales is false after a delete: the list already refreshed itself and
+  // should stay on its page.
+  async function load(reloadSales = true) {
     loading = true
     try {
-      const [r, s] = await Promise.all([
-        App.Report(model.ReportQuery.createFrom({ period, from, to })),
-        App.ListSales(model.SaleQuery.createFrom({ from, to, deleted: showDeleted }))
-      ])
-      report = r
-      sales = s
-      expanded = {}
+      // The transaction list is paged and loaded by its own tab.
+      report = await App.Report(model.ReportQuery.createFrom({ period, from, to }))
+      if (reloadSales) periodPage = itemPage = 1
+      if (reloadSales) salesRefresh++
     } catch (e) {
       handleError(e)
     } finally {
@@ -92,6 +104,7 @@
   let exporting = $state<'pdf' | 'xlsx' | null>(null)
 
   async function exportReport(format: 'pdf' | 'xlsx') {
+    if (exporting) return
     exporting = format
     try {
       const path = await App.ExportReport(model.ReportQuery.createFrom({ period, from, to }), format)
@@ -105,7 +118,6 @@
 
   $effect(() => {
     period
-    showDeleted
     load()
   })
 
@@ -122,6 +134,9 @@
       </div>
     {/if}
     <div class="flex gap-2">
+      {#if !admin}
+        <button class="btn btn-secondary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Muat ulang'}</button>
+      {/if}
       <button class="btn btn-secondary" onclick={() => exportReport('pdf')} disabled={exporting !== null || !report}>{exporting === 'pdf' ? 'Menyiapkan…' : 'Cetak PDF'}</button>
       <button class="btn btn-secondary" onclick={() => exportReport('xlsx')} disabled={exporting !== null || !report}>{exporting === 'xlsx' ? 'Menyiapkan…' : 'Export Excel'}</button>
     </div>
@@ -145,7 +160,7 @@
       <label class="label" for="to">Sampai</label>
       <input id="to" class="input" type="date" bind:value={to} />
     </div>
-    <button class="btn btn-primary" onclick={load} disabled={loading}>{loading ? 'Memuat…' : 'Tampilkan'}</button>
+    <button class="btn btn-primary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Tampilkan'}</button>
     <div class="ml-auto flex gap-1 text-sm">
       <button class="btn btn-ghost px-2 py-1" onclick={() => preset('today')}>Hari ini</button>
       <button class="btn btn-ghost px-2 py-1" onclick={() => preset('week')}>Minggu ini</button>
@@ -155,24 +170,23 @@
   </div>
   {/if}
 
-  {#if report}
+  {#snippet stat(label: string, value: string, sold: number | null = null, accent = false)}
+    <div class="card p-4">
+      <div class="text-sm text-slate-500">{label}{#if sold !== null && !loading} ({sold.toLocaleString('id-ID')} terjual){/if}</div>
+      {#if loading || !report}
+        <div class="mt-1 h-8 w-32 animate-pulse rounded bg-slate-200"></div>
+      {:else}
+        <div class="text-2xl font-bold {accent ? 'text-brand-700' : ''}">{value}</div>
+      {/if}
+    </div>
+  {/snippet}
+
+  {#if report || loading}
     <div class="mt-4 grid grid-cols-4 gap-4">
-      <div class="card p-4">
-        <div class="text-sm text-slate-500">Jumlah transaksi</div>
-        <div class="text-2xl font-bold">{report.transactions.toLocaleString('id-ID')}</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-500">Tiket ({report.ticketQty.toLocaleString('id-ID')} terjual)</div>
-        <div class="text-2xl font-bold">{formatRp(report.ticketTotal)}</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-500">Topup Card ({report.topupQty.toLocaleString('id-ID')} terjual)</div>
-        <div class="text-2xl font-bold">{formatRp(report.topupTotal)}</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-500">Total pendapatan</div>
-        <div class="text-2xl font-bold text-brand-700">{formatRp(report.total)}</div>
-      </div>
+      {@render stat('Jumlah transaksi', report?.transactions.toLocaleString('id-ID') ?? '')}
+      {@render stat('Tiket', formatRp(report?.ticketTotal ?? 0), report?.ticketQty ?? null)}
+      {@render stat('Topup Card', formatRp(report?.topupTotal ?? 0), report?.topupQty ?? null)}
+      {@render stat('Total pendapatan', formatRp(report?.total ?? 0), null, true)}
     </div>
 
     <div class="mt-4 flex gap-1 border-b border-slate-200">
@@ -180,25 +194,41 @@
         <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'period' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'period')}>Per {periods.find((p) => p.value === report?.period)?.unit}</button>
       {/if}
       <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'ticket' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'ticket')}>Per item</button>
-      <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'sales' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'sales')}>{showDeleted ? 'Nota dihapus' : 'Daftar transaksi'} ({sales.length})</button>
-      {#if tab === 'sales'}
-        <div class="ml-auto flex items-center gap-4 pb-1 text-sm">
-          {#if admin}
-            <label class="flex items-center gap-2 text-slate-600"><input type="checkbox" bind:checked={showDeleted} /> Tampilkan nota dihapus</label>
-          {/if}
-          <button class="btn btn-ghost px-2 py-1" onclick={toggleAll} disabled={sales.length === 0}>{allExpanded ? 'Tutup semua rincian' : 'Buka semua rincian'}</button>
-        </div>
+      <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'sales' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'sales')}>{showDeleted ? 'Nota dihapus' : 'Daftar transaksi'}</button>
+      {#if tab === 'sales' && admin}
+        <label class="ml-auto flex items-center gap-2 pb-1 text-sm text-slate-600"><input type="checkbox" bind:checked={showDeleted} /> Tampilkan nota dihapus</label>
       {/if}
     </div>
 
-    <div class="card mt-2 min-h-0 flex-1 overflow-y-auto">
-      {#if tab === 'period'}
+    {#if tab === 'sales' && !report}
+      <div class="relative mt-2 flex min-h-40 flex-1 flex-col">
+        <div class="card flex-1"></div>
+        <LoadingOverlay show />
+      </div>
+    {:else if tab === 'sales' && report}
+      <div class="mt-2 flex min-h-0 flex-1 flex-col">
+        <SalesBrowser
+          from={report.from}
+          to={report.to}
+          waiting={loading}
+          deleted={showDeleted}
+          refresh={salesRefresh}
+          emptyText={showDeleted ? 'Tidak ada nota dihapus pada rentang ini.' : 'Tidak ada transaksi pada rentang ini.'}
+          ondeleted={() => load(false)}
+        />
+      </div>
+    {:else}
+    <div class="relative mt-2 flex min-h-0 flex-1 flex-col">
+    <div class="card min-h-40 flex-1 overflow-y-auto">
+      {#if !report}
+        <!-- first load: the overlay below says what is happening -->
+      {:else if tab === 'period'}
         <table class="table">
           <thead class="sticky top-0">
             <tr><th>Periode</th><th class="text-right">Transaksi</th><th class="text-right">Tiket</th><th class="text-right">Rp Tiket</th><th class="text-right">Topup</th><th class="text-right">Rp Topup</th><th class="text-right">Total</th></tr>
           </thead>
           <tbody>
-            {#each report.rows as r}
+            {#each periodRows as r}
               <tr>
                 <td>{formatPeriod(r.period, report.period)}</td>
                 <td class="text-right">{r.transactions}</td>
@@ -212,32 +242,54 @@
               <tr><td colspan="7" class="py-10 text-center text-slate-500">Tidak ada penjualan pada rentang ini.</td></tr>
             {/each}
           </tbody>
+          {#if report.rows.length > 0}
+            <tfoot>
+              <tr class="font-semibold">
+                <td>Total</td>
+                <td class="text-right">{report.transactions}</td>
+                <td class="text-right">{report.ticketQty}</td>
+                <td class="text-right">{formatRp(report.ticketTotal)}</td>
+                <td class="text-right">{report.topupQty}</td>
+                <td class="text-right">{formatRp(report.topupTotal)}</td>
+                <td class="text-right">{formatRp(report.total)}</td>
+              </tr>
+            </tfoot>
+          {/if}
         </table>
       {:else if tab === 'ticket'}
         <table class="table">
           <thead class="sticky top-0"><tr><th>Item</th><th class="text-right">Terjual</th><th class="text-right">Total</th></tr></thead>
-          {#each itemGroups as g (g.label)}
-            <tbody>
-              <tr class="bg-slate-50"><td colspan="3" class="font-semibold text-brand-700">{g.label}</td></tr>
-              {#each g.items as r (r.ticketId)}
-                <tr><td class="pl-8">{r.ticketName}</td><td class="text-right">{r.qty}</td><td class="text-right font-medium">{formatRp(r.total)}</td></tr>
-              {/each}
-              <tr class="font-semibold"><td class="pl-8">Subtotal {g.label}</td><td class="text-right">{g.qty}</td><td class="text-right">{formatRp(g.total)}</td></tr>
-            </tbody>
-          {:else}
-            <tbody><tr><td colspan="3" class="py-10 text-center text-slate-500">Tidak ada penjualan pada rentang ini.</td></tr></tbody>
-          {/each}
+          <tbody>
+            {#each itemPageRows as row, i (row.item.ticketId)}
+              {#if i === 0 || row.first}
+                <tr class="bg-slate-50"><td colspan="3" class="font-semibold text-brand-700">{row.group.label}{row.first ? '' : ' (lanjutan)'}</td></tr>
+              {/if}
+              <tr><td class="pl-8">{row.item.ticketName}</td><td class="text-right">{row.item.qty}</td><td class="text-right font-medium">{formatRp(row.item.total)}</td></tr>
+              {#if row.last}
+                <tr class="font-semibold"><td class="pl-8">Subtotal {row.group.label}</td><td class="text-right">{row.group.qty}</td><td class="text-right">{formatRp(row.group.total)}</td></tr>
+              {/if}
+            {:else}
+              <tr><td colspan="3" class="py-10 text-center text-slate-500">Tidak ada penjualan pada rentang ini.</td></tr>
+            {/each}
+          </tbody>
+          {#if itemRows.length > 0}
+            <tfoot>
+              <tr class="font-semibold"><td>Total</td><td class="text-right">{report.qty}</td><td class="text-right">{formatRp(report.total)}</td></tr>
+            </tfoot>
+          {/if}
         </table>
-      {:else}
-        <SalesTable
-          {sales}
-          bind:expanded
-          showTotal={!showDeleted}
-          empty={showDeleted ? 'Tidak ada nota dihapus pada rentang ini.' : 'Tidak ada transaksi pada rentang ini.'}
-          ondeleted={load}
-        />
       {/if}
     </div>
+    <LoadingOverlay show={loading} />
+    </div>
+    {#if !report}
+      <!-- no pager before the first report -->
+    {:else if tab === 'period'}
+      <Pager page={periodPage} pageSize={tabPageSize} count={report.rows.length} ongoto={(p) => (periodPage = p)} />
+    {:else if tab === 'ticket'}
+      <Pager page={itemPage} pageSize={tabPageSize} count={itemRows.length} ongoto={(p) => (itemPage = p)} />
+    {/if}
+    {/if}
   {/if}
 </div>
 

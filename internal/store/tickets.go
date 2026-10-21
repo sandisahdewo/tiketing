@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 
 	"tiket/internal/model"
 )
@@ -45,6 +46,47 @@ func (s *Store) ListTickets(search string, deleted, activeOnly bool) ([]model.Ti
 		tickets = append(tickets, t)
 	}
 	return tickets, rows.Err()
+}
+
+// SearchTickets returns one page of tickets matching q (already validated),
+// ordered as on the cashier screen: tickets before topups, then by name.
+func (s *Store) SearchTickets(q model.TicketQuery) (model.TicketPage, error) {
+	out := model.TicketPage{Tickets: []model.Ticket{}, Page: q.Page, PageSize: q.PageSize}
+	where := " WHERE deleted_at IS NULL"
+	switch q.Status {
+	case model.TicketDeleted:
+		where = " WHERE deleted_at IS NOT NULL"
+	case model.TicketActive:
+		where += " AND active = 1"
+	case model.TicketInactive:
+		where += " AND active = 0"
+	}
+	var args []any
+	if q.Category != "" {
+		where += " AND category = ?"
+		args = append(args, q.Category)
+	}
+	if search := strings.TrimSpace(q.Search); search != "" {
+		where += ` AND name LIKE ? ESCAPE '\'`
+		args = append(args, likePattern(search))
+	}
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM tickets"+where, args...).Scan(&out.Count); err != nil || out.Count == 0 {
+		return out, err
+	}
+	rows, err := s.DB.Query("SELECT "+ticketColumns+" FROM tickets"+where+" ORDER BY category, name, id LIMIT ? OFFSET ?",
+		append(args, q.PageSize, (q.Page-1)*q.PageSize)...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		t, err := scanTicket(rows)
+		if err != nil {
+			return out, err
+		}
+		out.Tickets = append(out.Tickets, t)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetTicket(id int64) (model.Ticket, error) {
