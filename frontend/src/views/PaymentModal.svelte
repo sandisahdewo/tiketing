@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
   import MoneyInput from '../components/MoneyInput.svelte'
+  import Field from '../components/Field.svelte'
   import { formatMoney, formatRp } from '../lib/money'
 
   let {
@@ -16,6 +17,7 @@
   } = $props()
 
   let paid = $state<number | null>(null)
+  let paidInvalid = $state(false)
   let input: MoneyInput
 
   let change = $derived(paid == null ? null : paid - total)
@@ -46,10 +48,9 @@
     <div class="text-4xl font-bold text-brand-700">{formatRp(total)}</div>
   </div>
 
-  <div class="mt-5">
-    <label class="label" for="paid">Uang diterima</label>
-    <MoneyInput id="paid" bind:this={input} bind:value={paid} autofocus large onenter={submit} />
-  </div>
+  <Field class="mt-5" label="Uang diterima" id="paid" error={paidInvalid ? 'Angka terlalu besar' : ''}>
+    <MoneyInput id="paid" bind:this={input} bind:value={paid} bind:invalid={paidInvalid} autofocus large onenter={submit} />
+  </Field>
 
   <div class="mt-3 grid grid-cols-3 gap-2">
     {#each suggestions as s, i}

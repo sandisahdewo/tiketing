@@ -4,6 +4,8 @@
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import MoneyInput from '../components/MoneyInput.svelte'
+  import Field from '../components/Field.svelte'
+  import { FormState, required, maxLength } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
   import { categories, categoryLabel, colors, colorClass } from '../lib/colors'
@@ -33,7 +35,11 @@
 
 
   let editing = $state<{ id: number; name: string; price: number | null; category: string; color: string } | null>(null)
-  let formError = $state('')
+  let priceInvalid = $state(false)
+  const form = new FormState(() => ({
+    name: required(editing?.name, 'Nama tiket wajib diisi') ?? maxLength(editing?.name ?? '', 100, 'Nama tiket maksimal 100 karakter'),
+    price: priceInvalid ? 'Angka terlalu besar' : required(editing?.price, 'Harga wajib diisi')
+  }))
   let saving = $state(false)
   let confirmDelete = $state<model.Ticket | null>(null)
   let confirmActive = $state<model.Ticket | null>(null)
@@ -83,7 +89,7 @@
   })
 
   function openForm(t?: model.Ticket) {
-    formError = ''
+    form.reset()
     editing = t
       ? { id: t.id, name: t.name, price: t.price, category: t.category, color: t.color }
       : { id: 0, name: '', price: null, category: category || 'ticket', color: 'orange' }
@@ -91,20 +97,15 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault()
-    if (!editing || saving) return
-    if (editing.price == null) {
-      formError = 'Harga wajib diisi dengan angka yang valid'
-      return
-    }
+    if (!editing || saving || !form.check()) return
     saving = true
-    formError = ''
     try {
       await App.SaveTicket(model.TicketInput.createFrom({ id: editing.id, name: editing.name, price: editing.price, category: editing.category, color: editing.color }))
       toast(editing.id ? 'Tiket diperbarui' : 'Tiket ditambahkan')
       editing = null
       load()
     } catch (e) {
-      formError = errorMessage(e)
+      form.fail(errorMessage(e), { name: /nama tiket/i, price: /harga/i, category: /kategori/i, color: /warna/i })
     } finally {
       saving = false
     }
@@ -237,26 +238,21 @@
 
 {#if editing}
   <Modal title={editing.id ? 'Ubah Tiket' : 'Tambah Tiket'} onclose={() => (editing = null)}>
-    <form id="ticket-form" class="space-y-4" onsubmit={save}>
-      <div>
-        <label class="label" for="name">Nama tiket</label>
-        <input id="name" class="input" bind:value={editing.name} required maxlength="100" />
-      </div>
-      <div>
-        <label class="label" for="price">Harga</label>
-        <MoneyInput id="price" bind:value={editing.price} />
-        <p class="mt-1 text-xs text-slate-500">Boleh pecahan, contoh 12.500,50</p>
-      </div>
-      <div>
-        <span class="label">Kategori</span>
+    <form id="ticket-form" class="space-y-4" onsubmit={save} novalidate>
+      <Field label="Nama tiket" id="name" {form} name="name">
+        <input id="name" class="input" bind:value={editing.name} maxlength="100" />
+      </Field>
+      <Field label="Harga" id="price" {form} name="price" hint="Boleh pecahan, contoh 12.500,50">
+        <MoneyInput id="price" bind:value={editing.price} bind:invalid={priceInvalid} />
+      </Field>
+      <Field label="Kategori" {form} name="category">
         <div class="flex w-fit rounded-md border border-slate-300 bg-white p-0.5 text-sm">
           {#each categories as c}
             <button type="button" class="rounded px-4 py-1.5 {editing.category === c.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => editing && (editing.category = c.value)}>{c.label}</button>
           {/each}
         </div>
-      </div>
-      <div>
-        <span class="label">Warna</span>
+      </Field>
+      <Field label="Warna" {form} name="color">
         <div class="flex flex-wrap gap-2">
           {#each colors as c}
             <button
@@ -272,8 +268,8 @@
           <span class="font-semibold break-words uppercase">{editing.name || 'Nama tiket'}</span>
           <span class="mt-1 text-sm opacity-90">({formatMoney(editing.price ?? 0)})</span>
         </div>
-      </div>
-      {#if formError}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>{/if}
+      </Field>
+      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (editing = null)}>Batal</button>

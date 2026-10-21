@@ -3,7 +3,9 @@
   import SalesBrowser from '../components/SalesBrowser.svelte'
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
-  import { App, model, handleError } from '../lib/api'
+  import Field from '../components/Field.svelte'
+  import { FormState, required } from '../lib/form.svelte'
+  import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatRp } from '../lib/money'
   import { formatDate, formatPeriod, toISODate, today } from '../lib/date'
   import { categories } from '../lib/colors'
@@ -39,6 +41,13 @@
   let loading = $state(false)
   let tab = $state<'period' | 'ticket' | 'sales'>(admin && !openToday ? 'period' : 'sales')
   let showDeleted = $state(false)
+  // Only the admin picks dates; cashiers always get today.
+  const dateForm = new FormState(() => ({
+    from: required(from, 'Tanggal awal wajib diisi'),
+    to: required(to, 'Tanggal akhir wajib diisi') ?? (from && to < from ? 'Tanggal akhir harus setelah tanggal awal' : undefined)
+  }))
+  const dateFields = { to: /tanggal akhir/i, from: /tanggal awal/i }
+
   // Bumped on every "Tampilkan" so the transaction list reloads too.
   let salesRefresh = $state(0)
 
@@ -88,6 +97,7 @@
   // reloadSales is false after a delete: the list already refreshed itself and
   // should stay on its page.
   async function load(reloadSales = true) {
+    if (admin && !dateForm.check()) return
     loading = true
     try {
       // The transaction list is paged and loaded by its own tab.
@@ -95,7 +105,8 @@
       if (reloadSales) periodPage = itemPage = 1
       if (reloadSales) salesRefresh++
     } catch (e) {
-      handleError(e)
+      if (admin && /tanggal/i.test(errorMessage(e))) dateForm.fail(errorMessage(e), dateFields)
+      else handleError(e)
     } finally {
       loading = false
     }
@@ -104,7 +115,7 @@
   let exporting = $state<'pdf' | 'xlsx' | null>(null)
 
   async function exportReport(format: 'pdf' | 'xlsx') {
-    if (exporting) return
+    if (exporting || (admin && !dateForm.check())) return
     exporting = format
     try {
       const path = await App.ExportReport(model.ReportQuery.createFrom({ period, from, to }), format)
@@ -152,14 +163,12 @@
         {/each}
       </div>
     </div>
-    <div>
-      <label class="label" for="from">Dari</label>
+    <Field label="Dari" id="from" form={dateForm} name="from">
       <input id="from" class="input" type="date" bind:value={from} />
-    </div>
-    <div>
-      <label class="label" for="to">Sampai</label>
+    </Field>
+    <Field label="Sampai" id="to" form={dateForm} name="to">
       <input id="to" class="input" type="date" bind:value={to} />
-    </div>
+    </Field>
     <button class="btn btn-primary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Tampilkan'}</button>
     <div class="ml-auto flex gap-1 text-sm">
       <button class="btn btn-ghost px-2 py-1" onclick={() => preset('today')}>Hari ini</button>

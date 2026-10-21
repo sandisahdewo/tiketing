@@ -1,5 +1,7 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
+  import Field from '../components/Field.svelte'
+  import { FormState, required, maxLength, username as usernameRule } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatDateTime } from '../lib/date'
   import { session } from '../lib/session.svelte'
@@ -8,7 +10,15 @@
   let users = $state<model.User[]>([])
   let loading = $state(true)
   let editing = $state<{ id: number; username: string; fullName: string; role: string; password: string } | null>(null)
-  let formError = $state('')
+  const form = new FormState(() => {
+    if (!editing) return {}
+    const pw = editing.password
+    return {
+      username: usernameRule(editing.username),
+      fullName: required(editing.fullName, 'Nama lengkap wajib diisi') ?? maxLength(editing.fullName, 100, 'Nama lengkap maksimal 100 karakter'),
+      password: !editing.id && pw === '' ? 'Password wajib diisi' : pw !== '' && [...pw].length < 4 ? 'Password minimal 4 karakter' : undefined
+    }
+  })
   let saving = $state(false)
   let confirmDelete = $state<model.User | null>(null)
 
@@ -28,7 +38,7 @@
   })
 
   function openForm(u?: model.User) {
-    formError = ''
+    form.reset()
     editing = u
       ? { id: u.id, username: u.username, fullName: u.fullName, role: u.role, password: '' }
       : { id: 0, username: '', fullName: '', role: 'kasir', password: '' }
@@ -36,9 +46,8 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault()
-    if (!editing || saving) return
+    if (!editing || saving || !form.check()) return
     saving = true
-    formError = ''
     try {
       const saved = await App.SaveUser(model.UserInput.createFrom(editing))
       if (session.user && saved.id === session.user.id) session.user = saved
@@ -46,7 +55,7 @@
       editing = null
       load()
     } catch (e) {
-      formError = errorMessage(e)
+      form.fail(errorMessage(e), { username: /username/i, fullName: /nama lengkap/i, password: /password/i, role: /role|admin/i })
     } finally {
       saving = false
     }
@@ -109,29 +118,29 @@
 
 {#if editing}
   <Modal title={editing.id ? 'Ubah Pengguna' : 'Tambah Pengguna'} onclose={() => (editing = null)}>
-    <form id="user-form" class="space-y-4" onsubmit={save}>
-      <div>
-        <label class="label" for="username">Username</label>
-        <input id="username" class="input" bind:value={editing.username} required autocomplete="off" />
-        <p class="mt-1 text-xs text-slate-500">3-32 karakter: huruf kecil, angka, titik, minus, garis bawah</p>
-      </div>
-      <div>
-        <label class="label" for="fullName">Nama lengkap</label>
-        <input id="fullName" class="input" bind:value={editing.fullName} required />
-      </div>
-      <div>
-        <label class="label" for="role">Role</label>
+    <form id="user-form" class="space-y-4" onsubmit={save} novalidate>
+      <Field label="Username" id="username" {form} name="username" hint="3-32 karakter: huruf kecil, angka, titik, minus, garis bawah">
+        <input id="username" class="input" bind:value={editing.username} autocomplete="off" />
+      </Field>
+      <Field label="Nama lengkap" id="fullName" {form} name="fullName">
+        <input id="fullName" class="input" bind:value={editing.fullName} maxlength="100" />
+      </Field>
+      <Field label="Role" id="role" {form} name="role">
         <select id="role" class="input" bind:value={editing.role}>
           <option value="kasir">Kasir: hanya penjualan</option>
           <option value="admin">Admin: penjualan, tiket, pengguna, laporan</option>
         </select>
-      </div>
-      <div>
-        <label class="label" for="password">{editing.id ? 'Password baru' : 'Password'}</label>
-        <input id="password" class="input" type="password" bind:value={editing.password} required={!editing.id} autocomplete="new-password" />
-        {#if editing.id}<p class="mt-1 text-xs text-slate-500">Kosongkan jika tidak ingin mengganti password</p>{/if}
-      </div>
-      {#if formError}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>{/if}
+      </Field>
+      <Field
+        label={editing.id ? 'Password baru' : 'Password'}
+        id="password"
+        {form}
+        name="password"
+        hint={editing.id ? 'Kosongkan jika tidak ingin mengganti password' : 'Minimal 4 karakter'}
+      >
+        <input id="password" class="input" type="password" bind:value={editing.password} autocomplete="new-password" />
+      </Field>
+      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (editing = null)}>Batal</button>

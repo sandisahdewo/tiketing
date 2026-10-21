@@ -4,6 +4,8 @@
   import { updateState } from '../lib/update.svelte'
   import { toast } from '../lib/toast.svelte'
   import Modal from '../components/Modal.svelte'
+  import Field from '../components/Field.svelte'
+  import { FormState, required, maxLength } from '../lib/form.svelte'
   import { today } from '../lib/date'
 
   let { onreset }: { onreset: () => void } = $props()
@@ -23,6 +25,21 @@
   let logo = $state('')
   let logoBusy = $state(false)
 
+  const localForm = new FormState(() => ({
+    terminal: required(terminal, 'Nama loket wajib diisi') ?? maxLength(terminal, 30, 'Nama loket maksimal 30 karakter'),
+    invoiceCode: /^[A-Za-z0-9]{0,4}$/.test(invoiceCode.trim()) ? undefined : 'Kode nota maksimal 4 karakter huruf/angka'
+  }))
+  // Printing problems belong to the printer field.
+  const localFields = { terminal: /terminal|loket/i, invoiceCode: /kode nota/i, paperWidth: /kertas/i, printerName: /printer|cetak/i }
+
+  const businessForm = new FormState(() => ({
+    businessName: maxLength(business.businessName, 100, 'Nama usaha maksimal 100 karakter'),
+    invoicePrefix: /^[A-Za-z0-9]{1,6}$/.test(business.invoicePrefix.trim()) ? undefined : 'Prefix nota 1-6 karakter huruf/angka, contoh PNY',
+    purposeWeekday: required(business.purposeWeekday, 'Purpose hari kerja wajib diisi') ?? maxLength(business.purposeWeekday, 40, 'Purpose maksimal 40 karakter'),
+    purposeWeekend: required(business.purposeWeekend, 'Purpose akhir pekan wajib diisi') ?? maxLength(business.purposeWeekend, 40, 'Purpose maksimal 40 karakter')
+  }))
+  let logoError = $state('')
+
   let invoiceExample = $derived(
     `${business.invoicePrefix.toUpperCase()}${invoiceCode.toUpperCase()}${today().replaceAll('-', '')}0001`
   )
@@ -38,6 +55,7 @@
   async function chooseLogo() {
     if (logoBusy) return
     logoBusy = true
+    logoError = ''
     try {
       if (await App.ChooseLogo()) {
         business.hasLogo = true
@@ -45,7 +63,7 @@
         toast('Logo disimpan')
       }
     } catch (e) {
-      handleError(e)
+      logoError = errorMessage(e)
     } finally {
       logoBusy = false
     }
@@ -54,13 +72,14 @@
   async function removeLogo() {
     if (logoBusy) return
     logoBusy = true
+    logoError = ''
     try {
       await App.RemoveLogo()
       business.hasLogo = false
       logo = ''
       toast('Logo dihapus')
     } catch (e) {
-      handleError(e)
+      logoError = errorMessage(e)
     } finally {
       logoBusy = false
     }
@@ -85,14 +104,14 @@
   // Saving and test printing both write the local settings, so they share
   // savingLocal and each blocks the other.
   async function saveLocal() {
-    if (savingLocal) return
+    if (savingLocal || !localForm.check()) return
     savingLocal = true
     try {
       await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
       session.info = await App.GetAppInfo()
       toast('Pengaturan komputer disimpan')
     } catch (e) {
-      handleError(e)
+      localForm.fail(errorMessage(e), localFields)
     } finally {
       savingLocal = false
     }
@@ -101,13 +120,13 @@
   let testPrinting = $state(false)
 
   async function testPrint() {
-    if (savingLocal) return
+    if (savingLocal || !localForm.check()) return
     savingLocal = testPrinting = true
     try {
       await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
       toast(await App.PrintTest())
     } catch (e) {
-      handleError(e)
+      localForm.fail(errorMessage(e), localFields)
     } finally {
       savingLocal = testPrinting = false
     }
@@ -115,13 +134,13 @@
 
   async function saveBusiness(e: SubmitEvent) {
     e.preventDefault()
-    if (savingBusiness) return
+    if (savingBusiness || !businessForm.check()) return
     savingBusiness = true
     try {
       await App.SaveSettings(business)
       toast('Info usaha disimpan')
     } catch (e) {
-      handleError(e)
+      businessForm.fail(errorMessage(e), { invoicePrefix: /prefix/i, purposeWeekday: /purpose/i, businessName: /nama usaha/i })
     } finally {
       savingBusiness = false
     }
@@ -168,31 +187,28 @@
       <h2 class="font-semibold">Komputer ini</h2>
       <p class="text-sm text-slate-500">Hanya berlaku untuk komputer ini.</p>
       <div class="mt-4 space-y-4">
-        <div>
-          <label class="label" for="terminal">Nama loket</label>
+        <Field label="Nama loket" id="terminal" form={localForm} name="terminal">
           <input id="terminal" class="input" bind:value={terminal} maxlength="30" />
-        </div>
-        <div>
-          <label class="label" for="code">Kode nota</label>
+        </Field>
+        {#snippet invoiceHint()}
+          Disisipkan setelah prefix. Contoh no. nota: <span class="font-mono font-semibold">{invoiceExample}</span>
+        {/snippet}
+        <Field label="Kode nota" id="code" form={localForm} name="invoiceCode" hint={invoiceHint}>
           <input id="code" class="input w-32 uppercase" bind:value={invoiceCode} maxlength="4" placeholder="25" />
-          <p class="mt-1 text-xs text-slate-500">
-            Disisipkan setelah prefix. Contoh no. nota: <span class="font-mono font-semibold">{invoiceExample}</span>
-          </p>
-        </div>
-        <div>
-          <label class="label" for="printer">Printer thermal</label>
+        </Field>
+        <Field label="Printer thermal" id="printer" form={localForm} name="printerName">
           <select id="printer" class="input" bind:value={printerName}>
             {#if printerName && !printers.includes(printerName)}<option value={printerName}>{printerName}</option>{/if}
             {#each printers as p}<option value={p}>{p}</option>{/each}
           </select>
-        </div>
-        <div>
-          <span class="label">Lebar kertas</span>
+        </Field>
+        <Field label="Lebar kertas" form={localForm} name="paperWidth">
           <div class="flex gap-4 text-sm">
             <label class="flex items-center gap-2"><input type="radio" bind:group={paperWidth} value={58} /> 58 mm</label>
             <label class="flex items-center gap-2"><input type="radio" bind:group={paperWidth} value={80} /> 80 mm</label>
           </div>
-        </div>
+        </Field>
+        {#if localForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{localForm.general}</p>{/if}
         <div class="flex gap-2">
           <button class="btn btn-primary" onclick={saveLocal} disabled={savingLocal}>{savingLocal && !testPrinting ? 'Menyimpan…' : 'Simpan'}</button>
           <button class="btn btn-secondary" onclick={testPrint} disabled={savingLocal}>{testPrinting ? 'Mencetak…' : 'Cetak Tes'}</button>
@@ -225,13 +241,15 @@
       <section class="card p-5">
         <h2 class="font-semibold">Info usaha di nota</h2>
         <p class="text-sm text-slate-500">Berlaku untuk semua komputer.</p>
-        <form class="mt-4 space-y-4" onsubmit={saveBusiness}>
-          <div>
-            <label class="label" for="bname">Nama usaha</label>
+        <form class="mt-4 space-y-4" onsubmit={saveBusiness} novalidate>
+          <Field label="Nama usaha" id="bname" form={businessForm} name="businessName">
             <input id="bname" class="input" bind:value={business.businessName} maxlength="100" />
-          </div>
-          <div>
-            <span class="label">Logo nota</span>
+          </Field>
+          <Field
+            label="Logo nota"
+            error={logoError}
+            hint="PNG/JPG maks. 1 MB. Logo dicetak hitam-putih menggantikan nama usaha. Gambar bergaris tegas di latar putih/transparan hasilnya paling bagus."
+          >
             <div class="flex items-center gap-4">
               <div class="flex h-24 w-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50">
                 {#if logo}
@@ -247,32 +265,25 @@
                 {/if}
               </div>
             </div>
-            <p class="mt-1 text-xs text-slate-500">PNG/JPG maks. 1 MB. Logo dicetak hitam-putih menggantikan nama usaha. Gambar bergaris tegas di latar putih/transparan hasilnya paling bagus.</p>
-          </div>
-          <div>
-            <label class="label" for="addr">Alamat / telepon</label>
+          </Field>
+          <Field label="Alamat / telepon" id="addr" form={businessForm} name="address">
             <textarea id="addr" class="input" rows="3" bind:value={business.address}></textarea>
-          </div>
-          <div>
-            <label class="label" for="footer">Catatan kaki nota</label>
+          </Field>
+          <Field label="Catatan kaki nota" id="footer" form={businessForm} name="footer">
             <textarea id="footer" class="input" rows="2" bind:value={business.footer} placeholder="Opsional"></textarea>
-          </div>
-          <div>
-            <label class="label" for="prefix">Prefix no. nota</label>
+          </Field>
+          <Field label="Prefix no. nota" id="prefix" form={businessForm} name="invoicePrefix" hint="1-6 huruf/angka">
             <input id="prefix" class="input w-32 uppercase" bind:value={business.invoicePrefix} maxlength="6" placeholder="PNY" />
-          </div>
+          </Field>
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="label" for="pwd">Purpose hari kerja</label>
+            <Field label="Purpose hari kerja" id="pwd" form={businessForm} name="purposeWeekday" hint="Senin–Jumat">
               <input id="pwd" class="input" bind:value={business.purposeWeekday} maxlength="40" />
-              <p class="mt-1 text-xs text-slate-500">Senin–Jumat</p>
-            </div>
-            <div>
-              <label class="label" for="pwe">Purpose akhir pekan</label>
+            </Field>
+            <Field label="Purpose akhir pekan" id="pwe" form={businessForm} name="purposeWeekend" hint="Sabtu–Minggu">
               <input id="pwe" class="input" bind:value={business.purposeWeekend} maxlength="40" />
-              <p class="mt-1 text-xs text-slate-500">Sabtu–Minggu</p>
-            </div>
+            </Field>
           </div>
+          {#if businessForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{businessForm.general}</p>{/if}
           <button class="btn btn-primary" disabled={savingBusiness}>{savingBusiness ? 'Menyimpan…' : 'Simpan'}</button>
         </form>
       </section>

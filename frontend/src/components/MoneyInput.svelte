@@ -7,6 +7,7 @@
     placeholder = '0',
     autofocus = false,
     large = false,
+    invalid = $bindable(false),
     onenter
   }: {
     value?: number | null
@@ -14,6 +15,8 @@
     placeholder?: string
     autofocus?: boolean
     large?: boolean
+    // true when the text is not a valid amount (e.g. too large); value is then null
+    invalid?: boolean
     onenter?: () => void
   } = $props()
 
@@ -22,7 +25,6 @@
   // text or caret actually differs from what the browser already shows.
   let el: HTMLInputElement
   let previous = value != null ? formatMoney(value) : ''
-  let invalid = $state(false)
 
   $effect(() => {
     el.value = previous
@@ -97,7 +99,7 @@
   <input
     bind:this={el}
     {id}
-    class="input text-right {large ? 'py-3 pl-12 text-2xl font-semibold' : 'pl-10'} {invalid ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ''}"
+    class="input text-right {large ? 'py-3 pl-12 text-2xl font-semibold' : 'pl-10'}"
     inputmode="decimal"
     autocomplete="off"
     autocorrect="off"
@@ -109,6 +111,3 @@
     {onkeydown}
   />
 </div>
-{#if invalid}
-  <p class="mt-1 text-xs text-red-600">Angka terlalu besar</p>
-{/if}

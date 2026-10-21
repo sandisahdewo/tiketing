@@ -1,7 +1,9 @@
 <script lang="ts">
   import Modal from './Modal.svelte'
+  import Field from './Field.svelte'
+  import { FormState, required, maxLength } from '../lib/form.svelte'
   import ReceiptModal from './ReceiptModal.svelte'
-  import { App, model, handleError } from '../lib/api'
+  import { App, model, errorMessage } from '../lib/api'
   import { formatRp } from '../lib/money'
   import { formatDateTime } from '../lib/date'
   import { categoryLabel } from '../lib/colors'
@@ -28,15 +30,19 @@
   let deleting = $state<model.Sale | null>(null)
   let deleteReason = $state('')
   let deleteBusy = $state(false)
+  const deleteForm = new FormState(() => ({
+    reason: required(deleteReason, 'Alasan hapus nota wajib diisi') ?? maxLength(deleteReason, 200, 'Alasan maksimal 200 karakter')
+  }))
 
   function askDelete(s: model.Sale) {
     deleting = s
     deleteReason = ''
+    deleteForm.reset()
   }
 
   async function removeSale(e: SubmitEvent) {
     e.preventDefault()
-    if (!deleting || deleteBusy) return
+    if (!deleting || deleteBusy || !deleteForm.check()) return
     deleteBusy = true
     try {
       await App.DeleteSale(deleting.id, deleteReason)
@@ -44,7 +50,7 @@
       deleting = null
       ondeleted?.()
     } catch (err) {
-      handleError(err)
+      deleteForm.fail(errorMessage(err), { reason: /alasan/i })
     } finally {
       deleteBusy = false
     }
@@ -121,20 +127,20 @@
 
 {#if deleting}
   <Modal title="Hapus Nota" onclose={() => (deleting = null)} width="max-w-md">
-    <form id="delete-sale-form" class="space-y-3" onsubmit={removeSale}>
+    <form id="delete-sale-form" class="space-y-3" onsubmit={removeSale} novalidate>
       <p>
         Hapus nota <b class="font-mono">{deleting.invoiceNo}</b> ({formatRp(deleting.total)}, kasir {deleting.cashierName})?
         Nota tidak dihitung lagi di laporan dan tidak bisa dicetak ulang. Nomor nota tidak dipakai ulang.
       </p>
-      <div>
-        <label class="label" for="delete-reason">Alasan</label>
+      <Field label="Alasan" id="delete-reason" form={deleteForm} name="reason">
         <!-- svelte-ignore a11y_autofocus -->
         <input id="delete-reason" class="input w-full" maxlength="200" bind:value={deleteReason} placeholder="contoh: salah input, transaksi batal" autofocus />
-      </div>
+      </Field>
+      {#if deleteForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteForm.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (deleting = null)}>Batal</button>
-      <button class="btn btn-danger" type="submit" form="delete-sale-form" disabled={deleteBusy || !deleteReason.trim()}>{deleteBusy ? 'Menghapus…' : 'Hapus Nota'}</button>
+      <button class="btn btn-danger" type="submit" form="delete-sale-form" disabled={deleteBusy}>{deleteBusy ? 'Menghapus…' : 'Hapus Nota'}</button>
     {/snippet}
   </Modal>
 {/if}
