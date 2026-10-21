@@ -23,6 +23,7 @@ type Service interface {
 	CreateSale(token string, in model.SaleInput) (model.Sale, error)
 	GetSale(token string, id int64) (model.Sale, error)
 	ListSales(token string, q model.SaleQuery) ([]model.Sale, error)
+	DeleteSale(token string, in model.DeleteSaleInput) error
 	Report(token string, q model.ReportQuery) (model.Report, error)
 
 	RecordPrint(token string, in model.PrintInput) error

@@ -175,6 +175,10 @@ func (r *Remote) ListSales(token string, q model.SaleQuery) ([]model.Sale, error
 	return out, r.call("listSales", token, q, &out)
 }
 
+func (r *Remote) DeleteSale(token string, in model.DeleteSaleInput) error {
+	return r.call("deleteSale", token, in, nil)
+}
+
 func (r *Remote) Report(token string, q model.ReportQuery) (model.Report, error) {
 	var out model.Report
 	return out, r.call("report", token, q, &out)

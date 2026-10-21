@@ -117,6 +117,9 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	route("listSales", call(func(t string, in model.SaleQuery) (any, error) {
 		return svc.ListSales(t, in)
 	}))
+	route("deleteSale", call(func(t string, in model.DeleteSaleInput) (any, error) {
+		return Empty{}, svc.DeleteSale(t, in)
+	}))
 	route("report", call(func(t string, in model.ReportQuery) (any, error) {
 		return svc.Report(t, in)
 	}))

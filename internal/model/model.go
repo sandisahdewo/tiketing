@@ -109,11 +109,21 @@ type Sale struct {
 	CreatedAt    string     `json:"createdAt"`
 	PrintCount   int64      `json:"printCount"`
 	Items        []SaleItem `json:"items"`
+
+	DeletedAt     *string `json:"deletedAt"`
+	DeletedByName string  `json:"deletedByName"`
+	DeleteReason  string  `json:"deleteReason"`
 }
 
 type SaleQuery struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Deleted bool   `json:"deleted"`
+}
+
+type DeleteSaleInput struct {
+	ID     int64  `json:"id"`
+	Reason string `json:"reason"`
 }
 
 type ReportQuery struct {

@@ -345,11 +345,19 @@ func (l *Local) ownSale(token string, id int64) (model.User, model.Sale, error) 
 }
 
 func (l *Local) RecordPrint(token string, in model.PrintInput) error {
-	u, _, err := l.ownSale(token, in.SaleID)
+	u, sale, err := l.ownSale(token, in.SaleID)
 	if err != nil {
 		return err
 	}
+	if sale.DeletedAt != nil {
+		return model.Invalid("Nota sudah dihapus, tidak bisa dicetak")
+	}
 	return l.Store.RecordPrint(in.SaleID, u.ID, cleanTerminal(in.Terminal))
+}
+
+// today is the server's current date; cashiers only see reports for it.
+func (l *Local) today() string {
+	return l.Store.Now().Format("2006-01-02")
 }
 
 func (l *Local) ListSales(token string, q model.SaleQuery) ([]model.Sale, error) {
@@ -359,16 +367,41 @@ func (l *Local) ListSales(token string, q model.SaleQuery) ([]model.Sale, error)
 	}
 	var userID int64
 	if u.Role != model.RoleAdmin {
+		if q.Deleted {
+			return nil, model.ErrForbidden
+		}
 		userID = u.ID
+		q.From, q.To = l.today(), l.today()
 	}
-	return l.Store.ListSales(q.From, q.To, userID)
+	return l.Store.ListSales(q.From, q.To, userID, q.Deleted)
+}
+
+func (l *Local) DeleteSale(token string, in model.DeleteSaleInput) error {
+	u, err := l.user(token, model.RoleAdmin)
+	if err != nil {
+		return err
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" {
+		return model.Invalid("Alasan hapus nota wajib diisi")
+	}
+	if utf8.RuneCountInString(reason) > 200 {
+		return model.Invalid("Alasan maksimal 200 karakter")
+	}
+	return l.Store.DeleteSale(in.ID, u.ID, reason)
 }
 
 func (l *Local) Report(token string, q model.ReportQuery) (model.Report, error) {
-	if _, err := l.user(token, model.RoleAdmin); err != nil {
+	u, err := l.user(token)
+	if err != nil {
 		return model.Report{}, err
 	}
-	return l.Store.Report(q)
+	var userID int64
+	if u.Role != model.RoleAdmin {
+		userID = u.ID
+		q = model.ReportQuery{Period: "daily", From: l.today(), To: l.today()}
+	}
+	return l.Store.Report(q, userID)
 }
 
 func (l *Local) GetSettings(token string) (model.Settings, error) {

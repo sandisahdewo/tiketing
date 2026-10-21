@@ -1,5 +1,6 @@
 <script lang="ts">
   import Pos from './Pos.svelte'
+  import History from './History.svelte'
   import Tickets from './Tickets.svelte'
   import Users from './Users.svelte'
   import Reports from './Reports.svelte'
@@ -12,13 +13,14 @@
 
   let { onlogout, onreset }: { onlogout: () => void; onreset: () => void } = $props()
 
-  type View = 'pos' | 'tickets' | 'users' | 'reports' | 'settings'
+  type View = 'pos' | 'history' | 'tickets' | 'users' | 'reports' | 'settings'
 
   const nav: { view: View; label: string; admin: boolean }[] = [
     { view: 'pos', label: 'Kasir', admin: false },
+    { view: 'history', label: 'Riwayat', admin: false },
     { view: 'tickets', label: 'Tiket', admin: true },
     { view: 'users', label: 'Pengguna', admin: true },
-    { view: 'reports', label: 'Laporan', admin: true },
+    { view: 'reports', label: 'Laporan', admin: false },
     { view: 'settings', label: 'Pengaturan', admin: false }
   ]
 
@@ -71,7 +73,9 @@
 
   <main class="min-h-0 flex-1">
     {#if view === 'pos'}
-      <Pos />
+      <Pos onhistory={() => (view = 'history')} />
+    {:else if view === 'history'}
+      <History />
     {:else if view === 'tickets'}
       <Tickets />
     {:else if view === 'users'}

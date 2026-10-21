@@ -10,7 +10,8 @@ var periodExpr = map[string]string{
 	"monthly": "strftime('%Y-%m', s.created_at)",
 }
 
-func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
+// Report summarises non-deleted sales. A userID > 0 limits it to that cashier.
+func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) {
 	expr, ok := periodExpr[q.Period]
 	if !ok {
 		return model.Report{}, model.Invalid("Periode laporan tidak valid")
@@ -26,6 +27,12 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 		Rows:    []model.ReportRow{},
 		Tickets: []model.ReportTicketRow{},
 	}
+	where := "s.created_at >= ? AND s.created_at < ? AND s.deleted_at IS NULL"
+	args := []any{start, end}
+	if userID > 0 {
+		where += " AND s.user_id = ?"
+		args = append(args, userID)
+	}
 
 	rows, err := s.DB.Query(
 		`SELECT `+expr+` AS period, COUNT(DISTINCT s.id), SUM(i.qty), SUM(i.subtotal),
@@ -36,9 +43,9 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 		 FROM sales s
 		 JOIN sale_items i ON i.sale_id = s.id
 		 JOIN tickets t ON t.id = i.ticket_id
-		 WHERE s.created_at >= ? AND s.created_at < ?
+		 WHERE `+where+`
 		 GROUP BY period ORDER BY period`,
-		start, end,
+		args...,
 	)
 	if err != nil {
 		return report, err
@@ -70,9 +77,9 @@ func (s *Store) Report(q model.ReportQuery) (model.Report, error) {
 		 FROM sales s
 		 JOIN sale_items i ON i.sale_id = s.id
 		 JOIN tickets t ON t.id = i.ticket_id
-		 WHERE s.created_at >= ? AND s.created_at < ?
+		 WHERE `+where+`
 		 GROUP BY t.id, t.name, t.category ORDER BY t.category, SUM(i.subtotal) DESC, t.name`,
-		start, end,
+		args...,
 	)
 	if err != nil {
 		return report, err

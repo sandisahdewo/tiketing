@@ -16,6 +16,8 @@ export function CreateSale(arg1:Array<model.SaleItemInput>,arg2:number):Promise<
 
 export function CurrentUser():Promise<model.User>;
 
+export function DeleteSale(arg1:number,arg2:string):Promise<void>;
+
 export function DeleteTicket(arg1:number):Promise<void>;
 
 export function DeleteUser(arg1:number):Promise<void>;

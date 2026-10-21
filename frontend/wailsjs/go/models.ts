@@ -40,6 +40,8 @@ export namespace main {
 	    lines: receipt.Line[];
 	    logo: string;
 	    printCount: number;
+	    deleted: boolean;
+	    deleteReason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReceiptView(source);
@@ -50,6 +52,8 @@ export namespace main {
 	        this.lines = this.convertValues(source["lines"], receipt.Line);
 	        this.logo = source["logo"];
 	        this.printCount = source["printCount"];
+	        this.deleted = source["deleted"];
+	        this.deleteReason = source["deleteReason"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -227,6 +231,9 @@ export namespace model {
 	    createdAt: string;
 	    printCount: number;
 	    items: SaleItem[];
+	    deletedAt?: string;
+	    deletedByName: string;
+	    deleteReason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Sale(source);
@@ -245,6 +252,9 @@ export namespace model {
 	        this.createdAt = source["createdAt"];
 	        this.printCount = source["printCount"];
 	        this.items = this.convertValues(source["items"], SaleItem);
+	        this.deletedAt = source["deletedAt"];
+	        this.deletedByName = source["deletedByName"];
+	        this.deleteReason = source["deleteReason"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -283,6 +293,7 @@ export namespace model {
 	export class SaleQuery {
 	    from: string;
 	    to: string;
+	    deleted: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleQuery(source);
@@ -292,6 +303,7 @@ export namespace model {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.from = source["from"];
 	        this.to = source["to"];
+	        this.deleted = source["deleted"];
 	    }
 	}
 	export class Settings {

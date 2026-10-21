@@ -1,10 +1,11 @@
 <script lang="ts">
   import PaymentModal from './PaymentModal.svelte'
-  import HistoryModal from './HistoryModal.svelte'
   import ReceiptModal from '../components/ReceiptModal.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
   import { colorClass } from '../lib/colors'
+
+  let { onhistory }: { onhistory: () => void } = $props()
 
   type CartItem = { ticket: model.Ticket; qty: number }
 
@@ -14,7 +15,6 @@
   let cart = $state<CartItem[]>([])
   let paying = $state(false)
   let saving = $state(false)
-  let showHistory = $state(false)
   let lastSaleId = $state<number | null>(null)
   let searchEl: HTMLInputElement
 
@@ -91,7 +91,7 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (paying || lastSaleId !== null || showHistory) return
+    if (paying || lastSaleId !== null) return
     if (e.key === 'F2') {
       e.preventDefault()
       searchEl?.focus()
@@ -149,7 +149,7 @@
   <aside class="card flex w-[420px] shrink-0 flex-col">
     <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
       <h2 class="font-semibold">Pesanan</h2>
-      <button class="btn btn-ghost px-2 py-1 text-brand-700" onclick={() => (showHistory = true)}>Riwayat hari ini</button>
+      <button class="btn btn-ghost px-2 py-1 text-brand-700" onclick={onhistory}>Riwayat hari ini</button>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
@@ -207,8 +207,4 @@
 
 {#if lastSaleId !== null}
   <ReceiptModal saleId={lastSaleId} title="Pembayaran Berhasil" newTransaction onclose={newTransaction} />
-{/if}
-
-{#if showHistory}
-  <HistoryModal onclose={() => (showHistory = false)} />
 {/if}

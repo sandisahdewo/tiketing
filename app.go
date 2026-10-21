@@ -449,6 +449,14 @@ func (a *App) ListSales(q model.SaleQuery) ([]model.Sale, error) {
 	return out, a.check(err)
 }
 
+func (a *App) DeleteSale(id int64, reason string) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	return a.check(svc.DeleteSale(token, model.DeleteSaleInput{ID: id, Reason: reason}))
+}
+
 func (a *App) Report(q model.ReportQuery) (model.Report, error) {
 	svc, token, err := a.service()
 	if err != nil {
@@ -469,7 +477,7 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (string, error) {
 	if err != nil {
 		return "", a.check(err)
 	}
-	sales, err := svc.ListSales(token, model.SaleQuery{From: q.From, To: q.To})
+	sales, err := svc.ListSales(token, model.SaleQuery{From: report.From, To: report.To})
 	if err != nil {
 		return "", a.check(err)
 	}
@@ -536,9 +544,11 @@ func (a *App) SaveSettings(in model.Settings) error {
 }
 
 type ReceiptView struct {
-	Lines      []receipt.Line `json:"lines"`
-	Logo       string         `json:"logo"`
-	PrintCount int64          `json:"printCount"`
+	Lines        []receipt.Line `json:"lines"`
+	Logo         string         `json:"logo"`
+	PrintCount   int64          `json:"printCount"`
+	Deleted      bool           `json:"deleted"`
+	DeleteReason string         `json:"deleteReason"`
 }
 
 func (a *App) paperWidth() int {
@@ -598,7 +608,13 @@ func (a *App) ReceiptPreview(saleID int64) (ReceiptView, error) {
 	if err != nil {
 		return ReceiptView{}, err
 	}
-	return ReceiptView{Lines: lines, Logo: logoDataURL(logo), PrintCount: sale.PrintCount}, nil
+	return ReceiptView{
+		Lines:        lines,
+		Logo:         logoDataURL(logo),
+		PrintCount:   sale.PrintCount,
+		Deleted:      sale.DeletedAt != nil,
+		DeleteReason: sale.DeleteReason,
+	}, nil
 }
 
 func (a *App) printBytes(data []byte) (string, error) {
@@ -622,9 +638,12 @@ func (a *App) printBytes(data []byte) (string, error) {
 }
 
 func (a *App) PrintReceipt(saleID int64) (string, error) {
-	_, lines, logo, err := a.receiptFor(saleID)
+	sale, lines, logo, err := a.receiptFor(saleID)
 	if err != nil {
 		return "", err
+	}
+	if sale.DeletedAt != nil {
+		return "", model.Invalid("Nota sudah dihapus, tidak bisa dicetak")
 	}
 	msg, err := a.printBytes(receipt.ESCPOS(lines, logo))
 	if err != nil {

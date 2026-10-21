@@ -1,10 +1,14 @@
 <script lang="ts">
-  import ReceiptModal from '../components/ReceiptModal.svelte'
+  import SalesTable from '../components/SalesTable.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatRp } from '../lib/money'
-  import { formatDateTime, formatPeriod, toISODate, today } from '../lib/date'
+  import { formatDate, formatPeriod, toISODate, today } from '../lib/date'
   import { categories } from '../lib/colors'
   import { toast } from '../lib/toast.svelte'
+  import { session, isAdmin } from '../lib/session.svelte'
+
+  // Cashiers only get today's report of their own sales; the server enforces this too.
+  const admin = isAdmin()
 
   type Period = 'daily' | 'weekly' | 'monthly'
 
@@ -25,8 +29,15 @@
   let report = $state<model.Report | null>(null)
   let sales = $state<model.Sale[]>([])
   let loading = $state(false)
-  let tab = $state<'period' | 'ticket' | 'sales'>('period')
-  let selectedSale = $state<number | null>(null)
+  let tab = $state<'period' | 'ticket' | 'sales'>(admin ? 'period' : 'sales')
+  let showDeleted = $state(false)
+  let expanded = $state<Record<number, boolean>>({})
+  let allExpanded = $derived(sales.length > 0 && sales.every((s) => expanded[s.id]))
+
+  function toggleAll() {
+    const open = !allExpanded
+    expanded = Object.fromEntries(sales.map((s) => [s.id, open]))
+  }
 
   let itemGroups = $derived(
     categories
@@ -66,10 +77,11 @@
     try {
       const [r, s] = await Promise.all([
         App.Report(model.ReportQuery.createFrom({ period, from, to })),
-        App.ListSales(model.SaleQuery.createFrom({ from, to }))
+        App.ListSales(model.SaleQuery.createFrom({ from, to, deleted: showDeleted }))
       ])
       report = r
       sales = s
+      expanded = {}
     } catch (e) {
       handleError(e)
     } finally {
@@ -93,19 +105,29 @@
 
   $effect(() => {
     period
+    showDeleted
     load()
   })
+
 </script>
 
 <div class="flex h-full flex-col p-6">
   <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-bold">Laporan Penjualan</h1>
+    {#if admin}
+      <h1 class="text-2xl font-bold">Laporan Penjualan</h1>
+    {:else}
+      <div>
+        <h1 class="text-2xl font-bold">Laporan Hari Ini</h1>
+        <p class="text-sm text-slate-500">{session.user?.fullName} · {report ? formatDate(report.from) : '…'}</p>
+      </div>
+    {/if}
     <div class="flex gap-2">
       <button class="btn btn-secondary" onclick={() => exportReport('pdf')} disabled={exporting !== null || !report}>{exporting === 'pdf' ? 'Menyiapkan…' : 'Cetak PDF'}</button>
       <button class="btn btn-secondary" onclick={() => exportReport('xlsx')} disabled={exporting !== null || !report}>{exporting === 'xlsx' ? 'Menyiapkan…' : 'Export Excel'}</button>
     </div>
   </div>
 
+  {#if admin}
   <div class="card mt-4 flex flex-wrap items-end gap-4 p-4">
     <div>
       <span class="label">Periode</span>
@@ -131,6 +153,7 @@
       <button class="btn btn-ghost px-2 py-1" onclick={() => preset('year')}>Tahun ini</button>
     </div>
   </div>
+  {/if}
 
   {#if report}
     <div class="mt-4 grid grid-cols-4 gap-4">
@@ -153,9 +176,19 @@
     </div>
 
     <div class="mt-4 flex gap-1 border-b border-slate-200">
-      <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'period' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'period')}>Per {periods.find((p) => p.value === report?.period)?.unit}</button>
+      {#if admin}
+        <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'period' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'period')}>Per {periods.find((p) => p.value === report?.period)?.unit}</button>
+      {/if}
       <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'ticket' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'ticket')}>Per item</button>
-      <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'sales' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'sales')}>Daftar transaksi ({sales.length})</button>
+      <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'sales' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'sales')}>{showDeleted ? 'Nota dihapus' : 'Daftar transaksi'} ({sales.length})</button>
+      {#if tab === 'sales'}
+        <div class="ml-auto flex items-center gap-4 pb-1 text-sm">
+          {#if admin}
+            <label class="flex items-center gap-2 text-slate-600"><input type="checkbox" bind:checked={showDeleted} /> Tampilkan nota dihapus</label>
+          {/if}
+          <button class="btn btn-ghost px-2 py-1" onclick={toggleAll} disabled={sales.length === 0}>{allExpanded ? 'Tutup semua rincian' : 'Buka semua rincian'}</button>
+        </div>
+      {/if}
     </div>
 
     <div class="card mt-2 min-h-0 flex-1 overflow-y-auto">
@@ -196,29 +229,15 @@
           {/each}
         </table>
       {:else}
-        <table class="table">
-          <thead class="sticky top-0"><tr><th>Waktu</th><th>No. Nota</th><th>Kasir</th><th>Loket</th><th class="text-right">Total</th><th class="text-center">Cetak</th><th></th></tr></thead>
-          <tbody>
-            {#each sales as s (s.id)}
-              <tr class="hover:bg-slate-50">
-                <td>{formatDateTime(s.createdAt)}</td>
-                <td class="font-mono">{s.invoiceNo}</td>
-                <td>{s.cashierName}</td>
-                <td>{s.terminal}</td>
-                <td class="text-right font-medium">{formatRp(s.total)}</td>
-                <td class="text-center text-slate-500">{s.printCount}×</td>
-                <td class="text-right"><button class="btn btn-secondary px-3 py-1" onclick={() => (selectedSale = s.id)}>Nota</button></td>
-              </tr>
-            {:else}
-              <tr><td colspan="7" class="py-10 text-center text-slate-500">Tidak ada transaksi pada rentang ini.</td></tr>
-            {/each}
-          </tbody>
-        </table>
+        <SalesTable
+          {sales}
+          bind:expanded
+          showTotal={!showDeleted}
+          empty={showDeleted ? 'Tidak ada nota dihapus pada rentang ini.' : 'Tidak ada transaksi pada rentang ini.'}
+          ondeleted={load}
+        />
       {/if}
     </div>
   {/if}
 </div>
 
-{#if selectedSale !== null}
-  <ReceiptModal saleId={selectedSale} onclose={() => (selectedSale = null)} />
-{/if}

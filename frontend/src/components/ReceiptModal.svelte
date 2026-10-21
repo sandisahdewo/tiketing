@@ -51,7 +51,7 @@
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'F9' || (e.ctrlKey && e.key.toLowerCase() === 'p')) {
       e.preventDefault()
-      if (!printing) print()
+      if (!printing && !view?.deleted) print()
     }
   }
 </script>
@@ -59,7 +59,11 @@
 <svelte:window {onkeydown} />
 
 <Modal {title} {onclose} width="max-w-2xl">
-  {#if view && view.printCount > 0}
+  {#if view?.deleted}
+    <p class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+      Nota ini sudah <b>dihapus</b>{view.deleteReason ? `: ${view.deleteReason}` : ''}. Tidak bisa dicetak.
+    </p>
+  {:else if view && view.printCount > 0}
     <p class="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
       Nota ini sudah dicetak {view.printCount}× — cetakan berikutnya berlabel <b>Reprint {view.printCount}</b>.
     </p>
@@ -72,7 +76,7 @@
     {/if}
   </div>
   {#snippet footer()}
-    <button class="btn btn-secondary" onclick={print} disabled={printing || !view}>
+    <button class="btn btn-secondary" onclick={print} disabled={printing || !view || view.deleted}>
       {printing ? 'Mencetak…' : view && view.printCount > 0 ? `Cetak Ulang (F9)` : 'Cetak Nota (F9)'}
     </button>
     <button class="btn btn-primary" onclick={onclose}>{newTransaction ? 'Transaksi Baru' : 'Tutup'}</button>

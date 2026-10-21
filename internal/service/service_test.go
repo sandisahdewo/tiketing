@@ -92,9 +92,6 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	if _, err := svc.ListUsers(kasir); !errors.Is(err, model.ErrForbidden) {
 		t.Fatalf("kasir must not list users, got %v", err)
 	}
-	if _, err := svc.Report(kasir, model.ReportQuery{Period: "daily", From: "2026-10-01", To: "2026-10-31"}); !errors.Is(err, model.ErrForbidden) {
-		t.Fatalf("kasir must not see reports, got %v", err)
-	}
 	if err := svc.SaveSettings(kasir, model.Settings{BusinessName: "x"}); !errors.Is(err, model.ErrForbidden) {
 		t.Fatalf("kasir must not save settings, got %v", err)
 	}
@@ -178,8 +175,8 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	c.t = time.Date(2026, 11, 1, 10, 0, 0, 0, time.Local)
 	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 2}}, Paid: 10000100}))
 
-	if got := must(svc.ListSales(kasir, model.SaleQuery{From: "2026-10-01", To: "2026-10-31"})); len(got) != 2 {
-		t.Errorf("kasir should see only own sales in range, got %d", len(got))
+	if got := must(svc.ListSales(kasir, model.SaleQuery{From: "2026-10-01", To: "2026-10-31"})); len(got) != 1 || got[0].CreatedAt[:10] != "2026-11-01" {
+		t.Errorf("kasir should see only own sales of today, got %+v", got)
 	}
 	if got := must(svc.ListSales(admin, model.SaleQuery{From: "2026-10-01", To: "2026-10-31"})); len(got) != 3 {
 		t.Errorf("admin should see all sales in range, got %d", len(got))
@@ -381,5 +378,76 @@ func TestTopupCategory(t *testing.T) {
 	}
 	if len(r.Tickets) != 3 || r.Tickets[0].Category != model.CategoryTicket || r.Tickets[1].TicketID != topup100.ID {
 		t.Errorf("report items wrong: %+v", r.Tickets)
+	}
+}
+
+func TestKasirReportAndDeleteSale(t *testing.T) {
+	local, c := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	// Goes through the HTTP server so the new route and remote client are covered too.
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	sell := func(token string, qty int64) model.Sale {
+		return must(svc.CreateSale(token, model.SaleInput{Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: qty}}, Paid: qty * 1000000}))
+	}
+
+	c.t = time.Date(2026, 10, 4, 9, 0, 0, 0, time.Local)
+	sell(kasir, 5) // yesterday
+	c.t = time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)
+	mine := sell(kasir, 2)
+	victim := sell(kasir, 1)
+	sell(admin, 3) // someone else's sale today
+
+	r := must(svc.Report(kasir, model.ReportQuery{Period: "monthly", From: "2026-01-01", To: "2026-12-31"}))
+	if r.From != "2026-10-05" || r.To != "2026-10-05" || r.Period != "daily" || r.Transactions != 2 || r.Qty != 3 {
+		t.Errorf("kasir report should be own sales today: %+v", r)
+	}
+	list := must(svc.ListSales(kasir, model.SaleQuery{From: "2026-01-01", To: "2026-12-31"}))
+	if len(list) != 2 || len(list[1].Items) != 1 || list[1].Items[0].Qty != mine.Items[0].Qty || list[1].Items[0].TicketName != "Entry" {
+		t.Errorf("kasir list should hold today's own sales with items: %+v", list)
+	}
+	if _, err := svc.ListSales(kasir, model.SaleQuery{From: "2026-10-05", To: "2026-10-05", Deleted: true}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not list deleted sales, got %v", err)
+	}
+
+	if err := svc.DeleteSale(kasir, model.DeleteSaleInput{ID: victim.ID, Reason: "salah"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not delete sales, got %v", err)
+	}
+	if err := svc.DeleteSale(admin, model.DeleteSaleInput{ID: victim.ID, Reason: "  "}); err == nil {
+		t.Error("empty reason accepted")
+	}
+	if err := svc.DeleteSale(admin, model.DeleteSaleInput{ID: 999, Reason: "x"}); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unknown sale: %v", err)
+	}
+	if err := svc.DeleteSale(admin, model.DeleteSaleInput{ID: victim.ID, Reason: "Salah input"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteSale(admin, model.DeleteSaleInput{ID: victim.ID, Reason: "lagi"}); err == nil {
+		t.Error("double delete accepted")
+	}
+
+	all := must(svc.Report(admin, model.ReportQuery{Period: "daily", From: "2026-10-01", To: "2026-10-31"}))
+	if all.Transactions != 3 || all.Qty != 10 {
+		t.Errorf("deleted sale still counted: %+v", all)
+	}
+	if got := must(svc.ListSales(admin, model.SaleQuery{From: "2026-10-05", To: "2026-10-05"})); len(got) != 2 {
+		t.Errorf("deleted sale still listed: %d", len(got))
+	}
+	deleted := must(svc.ListSales(admin, model.SaleQuery{From: "2026-10-05", To: "2026-10-05", Deleted: true}))
+	if len(deleted) != 1 || deleted[0].ID != victim.ID || deleted[0].DeletedAt == nil || deleted[0].DeletedByName != "Pak Admin" || deleted[0].DeleteReason != "Salah input" {
+		t.Errorf("deleted list wrong: %+v", deleted)
+	}
+	if got := must(svc.GetSale(kasir, victim.ID)); got.DeletedAt == nil {
+		t.Error("GetSale should expose deletion")
+	}
+	if err := svc.RecordPrint(kasir, model.PrintInput{SaleID: victim.ID}); err == nil {
+		t.Error("printing a deleted sale accepted")
+	}
+
+	next := sell(kasir, 1)
+	if next.InvoiceNo != "TKT202610050004" {
+		t.Errorf("invoice number reused after delete: %s", next.InvoiceNo)
 	}
 }

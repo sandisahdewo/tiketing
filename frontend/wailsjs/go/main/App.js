@@ -26,6 +26,10 @@ export function CurrentUser() {
   return window['go']['main']['App']['CurrentUser']();
 }
 
+export function DeleteSale(arg1, arg2) {
+  return window['go']['main']['App']['DeleteSale'](arg1, arg2);
+}
+
 export function DeleteTicket(arg1) {
   return window['go']['main']['App']['DeleteTicket'](arg1);
 }

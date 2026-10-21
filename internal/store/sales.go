@@ -11,11 +11,14 @@ import (
 )
 
 const saleColumns = `s.id, s.invoice_no, s.user_id, u.full_name, s.terminal, s.total, s.paid, s.change_amount, s.created_at,
-	(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id)`
+	(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id), s.deleted_at, COALESCE(d.full_name, ''), s.delete_reason`
+
+const saleFrom = " FROM sales s JOIN users u ON u.id = s.user_id LEFT JOIN users d ON d.id = s.deleted_by"
 
 func scanSale(row interface{ Scan(...any) error }) (model.Sale, error) {
 	var s model.Sale
-	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount)
+	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount,
+		&s.DeletedAt, &s.DeletedByName, &s.DeleteReason)
 	s.Items = []model.SaleItem{}
 	return s, err
 }
@@ -106,37 +109,60 @@ func nextInvoice(tx *sql.Tx, base string, now time.Time) (string, error) {
 }
 
 func (s *Store) GetSale(id int64) (model.Sale, error) {
-	sale, err := scanSale(s.DB.QueryRow(
-		"SELECT "+saleColumns+" FROM sales s JOIN users u ON u.id = s.user_id WHERE s.id = ?", id,
-	))
+	sale, err := scanSale(s.DB.QueryRow("SELECT "+saleColumns+saleFrom+" WHERE s.id = ?", id))
 	if err != nil {
 		return sale, notFound(err)
 	}
+	sales := []model.Sale{sale}
+	if err := s.loadItems(sales); err != nil {
+		return sale, err
+	}
+	return sales[0], nil
+}
+
+// loadItems fills the Items of every sale in sales with a single query.
+func (s *Store) loadItems(sales []model.Sale) error {
+	if len(sales) == 0 {
+		return nil
+	}
+	index := make(map[int64]int, len(sales))
+	args := make([]any, len(sales))
+	for i, sale := range sales {
+		index[sale.ID] = i
+		args[i] = sale.ID
+	}
 	rows, err := s.DB.Query(
-		`SELECT i.id, i.ticket_id, t.name, t.category, i.price, i.qty, i.subtotal
+		`SELECT i.sale_id, i.id, i.ticket_id, t.name, t.category, i.price, i.qty, i.subtotal
 		 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id
-		 WHERE i.sale_id = ? ORDER BY i.id`, id,
+		 WHERE i.sale_id IN (?`+strings.Repeat(", ?", len(sales)-1)+`) ORDER BY i.id`, args...,
 	)
 	if err != nil {
-		return sale, err
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
+		var saleID int64
 		var it model.SaleItem
-		if err := rows.Scan(&it.ID, &it.TicketID, &it.TicketName, &it.Category, &it.Price, &it.Qty, &it.Subtotal); err != nil {
-			return sale, err
+		if err := rows.Scan(&saleID, &it.ID, &it.TicketID, &it.TicketName, &it.Category, &it.Price, &it.Qty, &it.Subtotal); err != nil {
+			return err
 		}
+		sale := &sales[index[saleID]]
 		sale.Items = append(sale.Items, it)
 	}
-	return sale, rows.Err()
+	return rows.Err()
 }
 
-func (s *Store) ListSales(from, to string, userID int64) ([]model.Sale, error) {
+func (s *Store) ListSales(from, to string, userID int64, deleted bool) ([]model.Sale, error) {
 	start, end, err := dateRange(from, to)
 	if err != nil {
 		return nil, err
 	}
-	query := "SELECT " + saleColumns + " FROM sales s JOIN users u ON u.id = s.user_id WHERE s.created_at >= ? AND s.created_at < ?"
+	query := "SELECT " + saleColumns + saleFrom + " WHERE s.created_at >= ? AND s.created_at < ?"
+	if deleted {
+		query += " AND s.deleted_at IS NOT NULL"
+	} else {
+		query += " AND s.deleted_at IS NULL"
+	}
 	args := []any{start, end}
 	if userID > 0 {
 		query += " AND s.user_id = ?"
@@ -155,7 +181,27 @@ func (s *Store) ListSales(from, to string, userID int64) ([]model.Sale, error) {
 		}
 		sales = append(sales, sale)
 	}
-	return sales, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return sales, s.loadItems(sales)
+}
+
+func (s *Store) DeleteSale(id, userID int64, reason string) error {
+	res, err := s.DB.Exec(
+		"UPDATE sales SET deleted_at = ?, deleted_by = ?, delete_reason = ? WHERE id = ? AND deleted_at IS NULL",
+		s.now(), userID, reason, id,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		if _, err := s.GetSale(id); err != nil {
+			return err
+		}
+		return model.Invalid("Nota sudah dihapus")
+	}
+	return nil
 }
 
 func dateRange(from, to string) (string, string, error) {
