@@ -17,6 +17,7 @@
     waiting = false,
     emptyText = 'Tidak ada transaksi.',
     highlight = null,
+    filter = { category: '', userId: 0, terminal: '' },
     ondeleted
   }: {
     from: string
@@ -29,6 +30,8 @@
     emptyText?: string
     // a sale to show at the top of the first page and blink (just made)
     highlight?: number | null
+    // optional report filters (category, cashier, counter)
+    filter?: { category: string; userId: number; terminal: string }
     ondeleted?: () => void
   } = $props()
 
@@ -56,7 +59,7 @@
     const seq = ++requestSeq
     loading = true
     try {
-      const out = await App.SearchSales(model.SalePageQuery.createFrom({ from, to, deleted, search: appliedSearch, page, pageSize, sort: sort.key, dir: sort.dir }))
+      const out = await App.SearchSales(model.SalePageQuery.createFrom({ from, to, deleted, search: appliedSearch, page, pageSize, sort: sort.key, dir: sort.dir, ...filter }))
       if (seq !== requestSeq) return
       // The last page can empty out after a delete; step back to the new last page.
       if (out.sales.length === 0 && out.count > 0 && page > 1) {
@@ -107,6 +110,7 @@
     appliedSearch
     refresh
     sort
+    filter
     untrack(() => {
       page = 1
       load()

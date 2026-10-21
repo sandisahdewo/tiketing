@@ -102,6 +102,10 @@ export function Report(arg1) {
   return window['go']['main']['App']['Report'](arg1);
 }
 
+export function ReportFilters() {
+  return window['go']['main']['App']['ReportFilters']();
+}
+
 export function ResetSetup() {
   return window['go']['main']['App']['ResetSetup']();
 }

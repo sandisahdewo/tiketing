@@ -210,6 +210,11 @@ func (r *Remote) Report(token string, q model.ReportQuery) (model.Report, error)
 	return out, r.call("report", token, q, &out)
 }
 
+func (r *Remote) ReportFilters(token string) (model.ReportFilters, error) {
+	var out model.ReportFilters
+	return out, r.call("reportFilters", token, nil, &out)
+}
+
 func (r *Remote) GetSettings(token string) (model.Settings, error) {
 	var out model.Settings
 	return out, r.call("getSettings", token, nil, &out)

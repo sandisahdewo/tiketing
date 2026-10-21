@@ -4,13 +4,14 @@
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import Field from '../components/Field.svelte'
-  import DateInput from '../components/DateInput.svelte'
+  import DateRangeInput from '../components/DateRangeInput.svelte'
+  import Select from '../components/Select.svelte'
   import SortHeader from '../components/SortHeader.svelte'
   import { sortRows, type Sort } from '../lib/sort'
-  import { FormState, required } from '../lib/form.svelte'
+  import { FormState } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatRp } from '../lib/money'
-  import { formatDate, formatPeriod, toISODate, today } from '../lib/date'
+  import { formatDate, formatPeriod, today } from '../lib/date'
   import { categories } from '../lib/colors'
   import { toast } from '../lib/toast.svelte'
   import { session, isAdmin } from '../lib/session.svelte'
@@ -33,24 +34,40 @@
     { value: 'monthly', label: 'Bulanan', unit: 'bulan' }
   ]
 
-  function startOfMonth(): string {
-    const d = new Date()
-    return toISODate(new Date(d.getFullYear(), d.getMonth(), 1))
-  }
-
   let period = $state<Period>('daily')
-  let from = $state(openToday ? today() : startOfMonth())
+  // Opens on today; other ranges are one click away in the date picker.
+  let from = $state(today())
   let to = $state(today())
   let report = $state<model.Report | null>(null)
   let loading = $state(false)
   let tab = $state<'period' | 'ticket' | 'sales'>(admin && !openToday ? 'period' : 'sales')
   let showDeleted = $state(false)
   // Only the admin picks dates; cashiers always get today.
+  // The range picker keeps the order of the two dates, so only a missing
+  // range or a server message can show up here.
   const dateForm = new FormState(() => ({
-    from: required(from, 'Tanggal awal wajib diisi'),
-    to: required(to, 'Tanggal akhir wajib diisi') ?? (from && to < from ? 'Tanggal akhir harus setelah tanggal awal' : undefined)
+    range: !from || !to ? 'Tanggal wajib dipilih' : undefined
   }))
-  const dateFields = { to: /tanggal akhir/i, from: /tanggal awal/i }
+  const dateFields = { range: /tanggal/i }
+
+  // Optional filters (admin). They apply right away, like the period buttons.
+  let category = $state('')
+  let cashierId = $state(0)
+  let terminal = $state('')
+  let filterChoices = $state<model.ReportFilters | null>(null)
+  let filtered = $derived(category !== '' || cashierId !== 0 || terminal !== '')
+  // The filters of the report on screen; the transaction list follows them.
+  let appliedFilter = $state({ category: '', userId: 0, terminal: '' })
+
+  function filterQuery() {
+    return { category, userId: cashierId, terminal }
+  }
+
+  function resetFilter() {
+    category = ''
+    cashierId = 0
+    terminal = ''
+  }
 
   // Bumped on every "Tampilkan" so the transaction list reloads too.
   let salesRefresh = $state(0)
@@ -111,24 +128,6 @@
   )
   let itemPageRows = $derived(itemRows.slice((itemPage - 1) * tabPageSize, itemPage * tabPageSize))
 
-  function preset(kind: string) {
-    if (kind === 'today') {
-      from = to = today()
-    } else if (kind === 'week') {
-      const d = new Date()
-      d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-      from = toISODate(d)
-      to = today()
-    } else if (kind === 'month') {
-      from = startOfMonth()
-      to = today()
-    } else if (kind === 'year') {
-      from = `${new Date().getFullYear()}-01-01`
-      to = today()
-    }
-    load()
-  }
-
   // reloadSales is false after a delete: the list already refreshed itself and
   // should stay on its page.
   async function load(reloadSales = true) {
@@ -136,9 +135,13 @@
     loading = true
     try {
       // The transaction list is paged and loaded by its own tab.
-      report = await App.Report(model.ReportQuery.createFrom({ period, from, to }))
-      if (reloadSales) periodPage = itemPage = 1
-      if (reloadSales) salesRefresh++
+      const f = filterQuery()
+      report = await App.Report(model.ReportQuery.createFrom({ period, from, to, ...f }))
+      if (reloadSales) {
+        periodPage = itemPage = 1
+        appliedFilter = f
+        salesRefresh++
+      }
     } catch (e) {
       if (admin && /tanggal/i.test(errorMessage(e))) dateForm.fail(errorMessage(e), dateFields)
       else handleError(e)
@@ -153,7 +156,7 @@
     if (exporting || (admin && !dateForm.check())) return
     exporting = format
     try {
-      const path = await App.ExportReport(model.ReportQuery.createFrom({ period, from, to }), format)
+      const path = await App.ExportReport(model.ReportQuery.createFrom({ period, from, to, ...filterQuery() }), format)
       if (path) toast('Laporan disimpan: ' + path)
     } catch (e) {
       handleError(e)
@@ -164,7 +167,14 @@
 
   $effect(() => {
     period
+    category
+    cashierId
+    terminal
     load()
+  })
+
+  $effect(() => {
+    if (admin) App.ReportFilters().then((f) => (filterChoices = f)).catch(handleError)
   })
 
 </script>
@@ -189,28 +199,35 @@
   </div>
 
   {#if admin}
-  <div class="card mt-4 flex flex-wrap items-end gap-4 px-4 pt-4 pb-7">
+  <div class="card mt-4 flex flex-wrap items-end gap-3 px-4 pt-4 pb-7">
     <div>
       <span class="label">Periode</span>
       <div class="flex rounded-md border border-slate-300 bg-white p-0.5 text-sm">
         {#each periods as p}
-          <button class="rounded px-4 py-1.5 {period === p.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (period = p.value)}>{p.label}</button>
+          <button class="rounded px-3 py-1.5 {period === p.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (period = p.value)}>{p.label}</button>
         {/each}
       </div>
     </div>
-    <Field label="Dari" id="from" form={dateForm} name="from" floatError class="w-48">
-      <DateInput id="from" bind:value={from} />
+    <Field label="Tanggal" id="f-range" form={dateForm} name="range" floatError class="w-64">
+      <DateRangeInput id="f-range" bind:from bind:to />
     </Field>
-    <Field label="Sampai" id="to" form={dateForm} name="to" floatError class="w-48">
-      <DateInput id="to" bind:value={to} />
+    <Field label="Kategori" id="f-category" class="w-[7.5rem]">
+      <Select id="f-category" bind:value={category} options={[{ value: '', label: 'Semua' }, ...categories]} />
     </Field>
+    <Field label="Kasir" id="f-cashier" class="w-[8.5rem]">
+      <Select
+        id="f-cashier"
+        bind:value={cashierId}
+        options={[{ value: 0, label: 'Semua' }, ...(filterChoices?.cashiers ?? []).map((c) => ({ value: c.id, label: c.fullName + (c.deleted ? ' (dihapus)' : '') }))]}
+      />
+    </Field>
+    <Field label="Loket" id="f-terminal" class="w-28">
+      <Select id="f-terminal" bind:value={terminal} options={[{ value: '', label: 'Semua' }, ...(filterChoices?.terminals ?? []).map((t) => ({ value: t, label: t }))]} />
+    </Field>
+    {#if filtered}
+      <button class="btn btn-ghost px-2 py-2 text-sm text-brand-700" onclick={resetFilter}>Reset filter</button>
+    {/if}
     <button class="btn btn-primary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Tampilkan'}</button>
-    <div class="ml-auto flex gap-1 text-sm">
-      <button class="btn btn-ghost px-2 py-1" onclick={() => preset('today')}>Hari ini</button>
-      <button class="btn btn-ghost px-2 py-1" onclick={() => preset('week')}>Minggu ini</button>
-      <button class="btn btn-ghost px-2 py-1" onclick={() => preset('month')}>Bulan ini</button>
-      <button class="btn btn-ghost px-2 py-1" onclick={() => preset('year')}>Tahun ini</button>
-    </div>
   </div>
   {/if}
 
@@ -258,6 +275,7 @@
           waiting={loading}
           deleted={showDeleted}
           refresh={salesRefresh}
+          filter={appliedFilter}
           emptyText={showDeleted ? 'Tidak ada nota dihapus pada rentang ini.' : 'Tidak ada transaksi pada rentang ini.'}
           ondeleted={() => load(false)}
         />

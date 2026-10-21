@@ -177,10 +177,61 @@ export namespace model {
 		    return a;
 		}
 	}
+	export class ReportCashier {
+	    id: number;
+	    fullName: string;
+	    deleted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportCashier(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.fullName = source["fullName"];
+	        this.deleted = source["deleted"];
+	    }
+	}
+	export class ReportFilters {
+	    cashiers: ReportCashier[];
+	    terminals: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportFilters(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cashiers = this.convertValues(source["cashiers"], ReportCashier);
+	        this.terminals = source["terminals"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ReportQuery {
 	    period: string;
 	    from: string;
 	    to: string;
+	    category: string;
+	    userId: number;
+	    terminal: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportQuery(source);
@@ -191,6 +242,9 @@ export namespace model {
 	        this.period = source["period"];
 	        this.from = source["from"];
 	        this.to = source["to"];
+	        this.category = source["category"];
+	        this.userId = source["userId"];
+	        this.terminal = source["terminal"];
 	    }
 	}
 	
@@ -333,6 +387,9 @@ export namespace model {
 	    to: string;
 	    deleted: boolean;
 	    search: string;
+	    category: string;
+	    userId: number;
+	    terminal: string;
 	    page: number;
 	    pageSize: number;
 	    sort: string;
@@ -348,6 +405,9 @@ export namespace model {
 	        this.to = source["to"];
 	        this.deleted = source["deleted"];
 	        this.search = source["search"];
+	        this.category = source["category"];
+	        this.userId = source["userId"];
+	        this.terminal = source["terminal"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	        this.sort = source["sort"];
@@ -359,6 +419,9 @@ export namespace model {
 	    to: string;
 	    deleted: boolean;
 	    search: string;
+	    category: string;
+	    userId: number;
+	    terminal: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleQuery(source);
@@ -370,6 +433,9 @@ export namespace model {
 	        this.to = source["to"];
 	        this.deleted = source["deleted"];
 	        this.search = source["search"];
+	        this.category = source["category"];
+	        this.userId = source["userId"];
+	        this.terminal = source["terminal"];
 	    }
 	}
 	export class Settings {

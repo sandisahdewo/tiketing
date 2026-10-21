@@ -116,6 +116,9 @@ func PDF(d Data) ([]byte, error) {
 	p.CellFormat(0, 8, tr(title(d)), "", 1, "L", false, 0, "")
 	p.SetFont("Helvetica", "", 10)
 	p.CellFormat(0, 6, tr("Periode: "+rangeText(r)+"   ·   "+periodName[r.Period]), "", 1, "L", false, 0, "")
+	if d.Filter != "" {
+		p.CellFormat(0, 6, tr("Filter: "+d.Filter), "", 1, "L", false, 0, "")
+	}
 
 	section(p, tr, "Ringkasan")
 	t := newTable(p, tr, []string{"", "Jumlah", "Pendapatan (Rp)"}, []float64{80, 40, 60}, "LRR")

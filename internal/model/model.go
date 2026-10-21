@@ -150,6 +150,28 @@ type SaleQuery struct {
 	To      string `json:"to"`
 	Deleted bool   `json:"deleted"`
 	Search  string `json:"search"`
+	ReportFilter
+}
+
+// ReportFilter narrows a report or sale list; zero values mean "all".
+// Category keeps the sales that contain at least one item of it (and, in a
+// report, counts only those items).
+type ReportFilter struct {
+	Category string `json:"category"`
+	UserID   int64  `json:"userId"`
+	Terminal string `json:"terminal"`
+}
+
+// ReportFilters lists the choices for the report filters.
+type ReportFilters struct {
+	Cashiers  []ReportCashier `json:"cashiers"`
+	Terminals []string        `json:"terminals"`
+}
+
+type ReportCashier struct {
+	ID       int64  `json:"id"`
+	FullName string `json:"fullName"`
+	Deleted  bool   `json:"deleted"`
 }
 
 // SalePageQuery asks for one page of sales; Page starts at 1. Sort is one of
@@ -185,6 +207,7 @@ type ReportQuery struct {
 	Period string `json:"period"`
 	From   string `json:"from"`
 	To     string `json:"to"`
+	ReportFilter
 }
 
 type ReportRow struct {

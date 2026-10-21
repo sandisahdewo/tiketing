@@ -16,6 +16,12 @@ body,
   height: 100%;
 }
 
+/* Native controls otherwise follow the operating system theme (e.g. grey on
+   a dark desktop). Dropdowns use components/Select.svelte for the same reason. */
+html {
+  color-scheme: light;
+}
+
 body {
   margin: 0;
   background: var(--color-slate-100);

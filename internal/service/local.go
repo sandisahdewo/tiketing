@@ -407,9 +407,19 @@ func (l *Local) today() string {
 
 // salesScope applies the role rules to a sale query: cashiers only see their
 // own sales of today and never the deleted ones. It returns the user filter.
+func validFilter(f model.ReportFilter) error {
+	if f.Category != "" && f.Category != model.CategoryTicket && f.Category != model.CategoryTopup {
+		return model.Invalid("Kategori tidak valid")
+	}
+	return nil
+}
+
 func (l *Local) salesScope(token string, q *model.SaleQuery) (int64, error) {
 	u, err := l.user(token)
 	if err != nil {
+		return 0, err
+	}
+	if err := validFilter(q.ReportFilter); err != nil {
 		return 0, err
 	}
 	if u.Role == model.RoleAdmin {
@@ -470,7 +480,17 @@ func (l *Local) Report(token string, q model.ReportQuery) (model.Report, error) 
 		userID = u.ID
 		q = model.ReportQuery{Period: "daily", From: l.today(), To: l.today()}
 	}
+	if err := validFilter(q.ReportFilter); err != nil {
+		return model.Report{}, err
+	}
 	return l.Store.Report(q, userID)
+}
+
+func (l *Local) ReportFilters(token string) (model.ReportFilters, error) {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return model.ReportFilters{}, err
+	}
+	return l.Store.ReportFilters()
 }
 
 func (l *Local) GetSettings(token string) (model.Settings, error) {

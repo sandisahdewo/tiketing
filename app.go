@@ -510,6 +510,16 @@ func (a *App) ListSales(q model.SaleQuery) ([]model.Sale, error) {
 	return out, a.check(err)
 }
 
+// ReportFilters lists the cashiers and counters for the report filters.
+func (a *App) ReportFilters() (model.ReportFilters, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ReportFilters{}, err
+	}
+	out, err := svc.ReportFilters(token)
+	return out, a.check(err)
+}
+
 // SearchSales returns one page of sales for the transaction lists.
 func (a *App) SearchSales(q model.SalePageQuery) (model.SalePage, error) {
 	svc, token, err := a.service()
@@ -553,7 +563,7 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 		return "", a.check(err)
 	}
 	// A PDF of a long range only lists the count, so don't fetch every sale for it.
-	salesQuery := model.SaleQuery{From: report.From, To: report.To}
+	salesQuery := model.SaleQuery{From: report.From, To: report.To, ReportFilter: q.ReportFilter}
 	page, err := svc.SearchSales(token, model.SalePageQuery{SaleQuery: salesQuery, PageSize: 1})
 	if err != nil {
 		return "", a.check(err)
@@ -568,7 +578,11 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 	if err != nil {
 		return "", a.check(err)
 	}
-	data := export.Data{Settings: settings, Report: report, Sales: sales, SalesCount: page.Count, PrintedAt: time.Now()}
+	filterNote, err := a.filterText(svc, token, q.ReportFilter)
+	if err != nil {
+		return "", a.check(err)
+	}
+	data := export.Data{Settings: settings, Report: report, Sales: sales, SalesCount: page.Count, Filter: filterNote, PrintedAt: time.Now()}
 	if u := a.CurrentUser(); u != nil {
 		data.PrintedBy = u.FullName
 	}
@@ -607,6 +621,36 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 		slog.Warn("OpenFile", "path", path, "error", err.Error())
 	}
 	return path, nil
+}
+
+// filterText describes the active report filters for an export, e.g.
+// "Kategori: Topup Card · Kasir: Budi".
+func (a *App) filterText(svc service.Service, token string, f model.ReportFilter) (string, error) {
+	var parts []string
+	switch f.Category {
+	case model.CategoryTicket:
+		parts = append(parts, "Kategori: Tiket")
+	case model.CategoryTopup:
+		parts = append(parts, "Kategori: Topup Card")
+	}
+	if f.UserID > 0 {
+		// Cashiers export their own report without filters, so this is an admin.
+		choices, err := svc.ReportFilters(token)
+		if err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf("#%d", f.UserID)
+		for _, c := range choices.Cashiers {
+			if c.ID == f.UserID {
+				name = c.FullName
+			}
+		}
+		parts = append(parts, "Kasir: "+name)
+	}
+	if f.Terminal != "" {
+		parts = append(parts, "Loket: "+f.Terminal)
+	}
+	return strings.Join(parts, " · "), nil
 }
 
 func (a *App) GetSettings() (model.Settings, error) {

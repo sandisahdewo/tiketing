@@ -117,6 +117,9 @@ func (w *sheetWriter) data(bold bool, values ...any) {
 func (w *sheetWriter) heading(d Data, subtitle string) {
 	w.line(w.styles.title, title(d))
 	w.line(0, "Periode: "+rangeText(d.Report))
+	if d.Filter != "" {
+		w.line(0, "Filter: "+d.Filter)
+	}
 	w.line(0, printedText(d))
 	if subtitle != "" {
 		w.line(w.styles.bold, subtitle)

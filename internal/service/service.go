@@ -28,6 +28,7 @@ type Service interface {
 	SearchSales(token string, q model.SalePageQuery) (model.SalePage, error)
 	DeleteSale(token string, in model.DeleteSaleInput) error
 	Report(token string, q model.ReportQuery) (model.Report, error)
+	ReportFilters(token string) (model.ReportFilters, error)
 
 	RecordPrint(token string, in model.PrintInput) error
 

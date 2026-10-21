@@ -756,3 +756,73 @@ func TestSorting(t *testing.T) {
 		t.Error("invalid ticket sort accepted")
 	}
 }
+
+func TestReportFilter(t *testing.T) {
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
+	sitiToken := must(svc.Login("siti", "1234")).Token
+
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
+	sell := func(token, terminal string, items ...model.SaleItemInput) {
+		must(svc.CreateSale(token, model.SaleInput{Terminal: terminal, Items: items, Paid: 1e10}))
+	}
+	sell(kasir, "LOKET 1", model.SaleItemInput{TicketID: entry.ID, Qty: 2})                                                  // Budi: 20.000
+	sell(kasir, "LOKET 2", model.SaleItemInput{TicketID: entry.ID, Qty: 1}, model.SaleItemInput{TicketID: topup.ID, Qty: 1}) // Budi: 10.000 + 50.000
+	sell(sitiToken, "LOKET 2", model.SaleItemInput{TicketID: topup.ID, Qty: 2})                                              // Siti: 100.000
+
+	day := model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-05"}
+	for _, tc := range []struct {
+		f            model.ReportFilter
+		transactions int64
+		total        int64
+		listed       int64
+	}{
+		{model.ReportFilter{}, 3, 18000000, 3},
+		{model.ReportFilter{Category: model.CategoryTopup}, 2, 15000000, 2},
+		{model.ReportFilter{Category: model.CategoryTicket}, 2, 3000000, 2},
+		{model.ReportFilter{UserID: siti.ID}, 1, 10000000, 1},
+		{model.ReportFilter{Terminal: "LOKET 2"}, 2, 16000000, 2},
+		{model.ReportFilter{Terminal: "LOKET 2", Category: model.CategoryTicket}, 1, 1000000, 1},
+		{model.ReportFilter{Terminal: "LOKET 9"}, 0, 0, 0},
+	} {
+		q := day
+		q.ReportFilter = tc.f
+		r := must(svc.Report(admin, q))
+		if r.Transactions != tc.transactions || r.Total != tc.total {
+			t.Errorf("report %+v: %d transaksi, total %d; want %d, %d", tc.f, r.Transactions, r.Total, tc.transactions, tc.total)
+		}
+		p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: model.SaleQuery{From: day.From, To: day.To, ReportFilter: tc.f}}))
+		if p.Count != tc.listed {
+			t.Errorf("sales %+v: %d listed, want %d", tc.f, p.Count, tc.listed)
+		}
+	}
+
+	// A cashier's own report ignores filters that would show other sales.
+	if r := must(svc.Report(kasir, model.ReportQuery{ReportFilter: model.ReportFilter{UserID: siti.ID}})); r.Transactions != 2 {
+		t.Errorf("kasir report should stay their own: %+v", r)
+	}
+	if p := must(svc.SearchSales(kasir, model.SalePageQuery{SaleQuery: model.SaleQuery{ReportFilter: model.ReportFilter{UserID: siti.ID}}})); p.Count != 2 {
+		t.Errorf("kasir list should stay their own: %d", p.Count)
+	}
+	if _, err := svc.Report(admin, model.ReportQuery{Period: "daily", From: day.From, To: day.To, ReportFilter: model.ReportFilter{Category: "voucher"}}); err == nil {
+		t.Error("invalid category accepted")
+	}
+
+	must(0, svc.DeleteUser(admin, siti.ID))
+	f := must(svc.ReportFilters(admin))
+	var names []string
+	for _, c := range f.Cashiers {
+		names = append(names, fmt.Sprintf("%s/%v", c.FullName, c.Deleted))
+	}
+	if strings.Join(names, ",") != "Budi/false,Pak Admin/false,Siti/true" || strings.Join(f.Terminals, ",") != "LOKET 1,LOKET 2" {
+		t.Errorf("filter choices: %v %v", names, f.Terminals)
+	}
+	if _, err := svc.ReportFilters(kasir); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not list filter choices: %v", err)
+	}
+}

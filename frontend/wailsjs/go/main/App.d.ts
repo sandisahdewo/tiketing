@@ -54,6 +54,8 @@ export function RemoveLogo():Promise<void>;
 
 export function Report(arg1:model.ReportQuery):Promise<model.Report>;
 
+export function ReportFilters():Promise<model.ReportFilters>;
+
 export function ResetSetup():Promise<void>;
 
 export function RestoreTicket(arg1:number):Promise<void>;

@@ -5,6 +5,7 @@
   import { toast } from '../lib/toast.svelte'
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import Select from '../components/Select.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
   import { today } from '../lib/date'
 
@@ -197,10 +198,11 @@
           <input id="code" class="input w-32 uppercase" bind:value={invoiceCode} maxlength="4" placeholder="25" />
         </Field>
         <Field label="Printer thermal" id="printer" form={localForm} name="printerName">
-          <select id="printer" class="input" bind:value={printerName}>
-            {#if printerName && !printers.includes(printerName)}<option value={printerName}>{printerName}</option>{/if}
-            {#each printers as p}<option value={p}>{p}</option>{/each}
-          </select>
+          <Select
+            id="printer"
+            bind:value={printerName}
+            options={[...(printerName && !printers.includes(printerName) ? [printerName] : []), ...printers].map((p) => ({ value: p, label: p }))}
+          />
         </Field>
         <Field label="Lebar kertas" form={localForm} name="paperWidth">
           <div class="flex gap-4 text-sm">

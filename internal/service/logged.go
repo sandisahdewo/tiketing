@@ -238,7 +238,14 @@ func (l *Logged) DeleteSale(token string, in model.DeleteSaleInput) error {
 func (l *Logged) Report(token string, q model.ReportQuery) (model.Report, error) {
 	c := l.begin(token)
 	out, err := c.svc.Report(token, q)
-	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "total", money.Format(out.Total))
+	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "category", q.Category, "userId", q.UserID, "terminal", q.Terminal, "total", money.Format(out.Total))
+	return out, err
+}
+
+func (l *Logged) ReportFilters(token string) (model.ReportFilters, error) {
+	c := l.begin(token)
+	out, err := c.svc.ReportFilters(token)
+	c.logError("ReportFilters", err, nil)
 	return out, err
 }
 

@@ -53,8 +53,8 @@ type Empty struct{}
 const HeaderOpID = "X-Op-ID"
 
 var (
-	readRoutes  = map[string]bool{"searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
-	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted"}
+	readRoutes  = map[string]bool{"reportFilters": true, "searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
+	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted", "category", "userId", "terminal"}
 )
 
 func requestUser(svc service.Service, token string, out any) string {
@@ -227,6 +227,9 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	}))
 	route("report", call(func(t string, in model.ReportQuery) (any, error) {
 		return svc.Report(t, in)
+	}))
+	route("reportFilters", call(func(t string, _ Empty) (any, error) {
+		return svc.ReportFilters(t)
 	}))
 	route("getSettings", call(func(t string, _ Empty) (any, error) {
 		return svc.GetSettings(t)

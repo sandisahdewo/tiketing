@@ -10,7 +10,8 @@ var periodExpr = map[string]string{
 	"monthly": "strftime('%Y-%m', s.created_at)",
 }
 
-// Report summarises non-deleted sales. A userID > 0 limits it to that cashier.
+// Report summarises non-deleted sales. A userID > 0 limits it to that
+// cashier and overrides q.UserID.
 func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) {
 	expr, ok := periodExpr[q.Period]
 	if !ok {
@@ -29,9 +30,21 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 	}
 	where := "s.created_at >= ? AND s.created_at < ? AND s.deleted_at IS NULL"
 	args := []any{start, end}
+	if userID == 0 {
+		userID = q.UserID
+	}
 	if userID > 0 {
 		where += " AND s.user_id = ?"
 		args = append(args, userID)
+	}
+	if q.Terminal != "" {
+		where += " AND s.terminal = ?"
+		args = append(args, q.Terminal)
+	}
+	// Only the items of the category count; both queries join tickets t.
+	if q.Category != "" {
+		where += " AND t.category = ?"
+		args = append(args, q.Category)
 	}
 
 	rows, err := s.DB.Query(
@@ -93,4 +106,44 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 		report.Tickets = append(report.Tickets, r)
 	}
 	return report, trows.Err()
+}
+
+// ReportFilters lists every cashier (deleted ones last) and every counter
+// that has sales.
+func (s *Store) ReportFilters() (model.ReportFilters, error) {
+	out := model.ReportFilters{Cashiers: []model.ReportCashier{}, Terminals: []string{}}
+	rows, err := s.DB.Query(`SELECT id, full_name, deleted_at IS NOT NULL FROM users ORDER BY deleted_at IS NOT NULL, full_name COLLATE NOCASE`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c model.ReportCashier
+		if err := rows.Scan(&c.ID, &c.FullName, &c.Deleted); err != nil {
+			return out, err
+		}
+		out.Cashiers = append(out.Cashiers, c)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	// Jumps from one counter to the next through the sales_terminal index
+	// instead of reading every sale.
+	trows, err := s.DB.Query(`WITH RECURSIVE t(v) AS (
+		SELECT MIN(terminal) FROM sales
+		UNION ALL
+		SELECT (SELECT MIN(terminal) FROM sales WHERE terminal > t.v) FROM t WHERE t.v IS NOT NULL
+	) SELECT v FROM t WHERE v IS NOT NULL`)
+	if err != nil {
+		return out, err
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var v string
+		if err := trows.Scan(&v); err != nil {
+			return out, err
+		}
+		out.Terminals = append(out.Terminals, v)
+	}
+	return out, trows.Err()
 }

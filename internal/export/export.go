@@ -20,8 +20,10 @@ type Data struct {
 	Report     model.Report
 	Sales      []model.Sale
 	SalesCount int64
-	PrintedBy  string
-	PrintedAt  time.Time
+	// Filter describes the active report filters, e.g. "Kasir: Budi"; empty for none.
+	Filter    string
+	PrintedBy string
+	PrintedAt time.Time
 }
 
 var (

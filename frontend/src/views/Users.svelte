@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import Select from '../components/Select.svelte'
   import SortHeader from '../components/SortHeader.svelte'
   import { sortRows, type Sort } from '../lib/sort'
   import { FormState, required, maxLength, username as usernameRule } from '../lib/form.svelte'
@@ -145,10 +146,14 @@
         <input id="fullName" class="input" bind:value={editing.fullName} maxlength="100" />
       </Field>
       <Field label="Role" id="role" {form} name="role">
-        <select id="role" class="input" bind:value={editing.role}>
-          <option value="kasir">Kasir: hanya penjualan</option>
-          <option value="admin">Admin: penjualan, tiket, pengguna, laporan</option>
-        </select>
+        <Select
+          id="role"
+          bind:value={editing.role}
+          options={[
+            { value: 'kasir', label: 'Kasir: hanya penjualan' },
+            { value: 'admin', label: 'Admin: penjualan, tiket, pengguna, laporan' }
+          ]}
+        />
       </Field>
       <Field
         label={editing.id ? 'Password baru' : 'Password'}
