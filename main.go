@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 
 	"tiket/internal/applog"
 	"tiket/internal/config"
@@ -68,6 +69,9 @@ func main() {
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "tiket-" + hex.EncodeToString(lockID[:8]),
 		},
+		Linux: &linux.Options{
+			WebviewGpuPolicy: linuxGpuPolicy(),
+		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{
@@ -79,4 +83,19 @@ func main() {
 		log.Fatal(err)
 	}
 	slog.Info("AppExit")
+}
+
+// linuxGpuPolicy lets the webview use the GPU when it helps. Without Linux
+// options Wails turns hardware acceleration off (a workaround for some
+// drivers, wails#2977), which makes long lists such as the cashier screen
+// scroll slowly. TIKET_GPU=never turns it off again on a machine that shows
+// a blank or broken window.
+func linuxGpuPolicy() linux.WebviewGpuPolicy {
+	switch os.Getenv("TIKET_GPU") {
+	case "never":
+		return linux.WebviewGpuPolicyNever
+	case "always":
+		return linux.WebviewGpuPolicyAlways
+	}
+	return linux.WebviewGpuPolicyOnDemand
 }

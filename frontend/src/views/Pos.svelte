@@ -196,8 +196,9 @@
           <h2 class="mb-2 font-semibold text-brand-700 {i > 0 ? 'mt-5' : ''}">{section.title}</h2>
           <div class="grid grid-cols-3 gap-3 xl:grid-cols-4 2xl:grid-cols-5">
             {#each section.items as t (t.id)}
+              <!-- content-visibility: tiles off screen are not laid out or painted until scrolled to -->
               <button
-                class="flex min-h-24 flex-col items-center justify-center rounded-md px-3 py-4 text-center text-white shadow-sm transition active:scale-[0.98] {colorClass(t.color)}"
+                class="flex min-h-24 flex-col items-center justify-center rounded-md px-3 py-4 text-center text-white shadow-sm transition-transform [contain-intrinsic-size:auto_6rem] [content-visibility:auto] active:scale-[0.98] {colorClass(t.color)}"
                 onclick={() => add(t)}
               >
                 <span class="font-semibold break-words uppercase">{t.name}</span>
