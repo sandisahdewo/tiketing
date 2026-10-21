@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +19,7 @@ import (
 	"github.com/pkg/browser"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"tiket/internal/applog"
 	"tiket/internal/config"
 	"tiket/internal/db"
 	"tiket/internal/export"
@@ -74,17 +75,24 @@ func (a *App) startup(ctx context.Context) {
 	cfg, err := config.Load(a.dataDir)
 	if err != nil {
 		a.startErr = "Gagal membaca konfigurasi: " + err.Error()
+		applog.Action("Startup", err)
 		return
 	}
 	a.cfg = cfg
+	applog.SetTerminal(cfg.Terminal)
 	if cfg.Mode != "" {
-		if err := a.activate(); err != nil {
+		err := a.activate()
+		if err != nil {
 			a.startErr = err.Error()
 		}
+		applog.Action("Startup", err, "mode", cfg.Mode, "port", cfg.Port, "server", cfg.ServerURL)
+	} else {
+		applog.Action("Startup", nil, "mode", "belum diatur")
 	}
 }
 
 func (a *App) shutdown(_ context.Context) {
+	applog.Action("Shutdown", nil)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.deactivate()
@@ -95,7 +103,7 @@ func (a *App) activate() error {
 	case config.ModeServer:
 		return a.startServer()
 	case config.ModeClient:
-		a.svc = service.NewRemote(a.cfg.ServerURL, appVersion)
+		a.svc = service.NewLogged(service.NewRemote(a.cfg.ServerURL, appVersion))
 		return nil
 	}
 	return errors.New("mode aplikasi belum dipilih")
@@ -112,7 +120,7 @@ func (a *App) startServer() error {
 		return fmt.Errorf("Gagal migrasi database: %w", err)
 	}
 	if err := db.BackupDaily(conn, backupDir); err != nil {
-		log.Printf("backup harian gagal: %v", err)
+		slog.Warn("BackupHarian", "error", err.Error())
 	}
 	local := service.NewLocal(store.New(conn), appVersion)
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", a.cfg.Port))
@@ -126,10 +134,10 @@ func (a *App) startServer() error {
 	}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("server berhenti: %v", err)
+			slog.Error("ServerStopped", "error", err.Error())
 		}
 	}()
-	a.conn, a.httpSrv, a.svc = conn, srv, local
+	a.conn, a.httpSrv, a.svc = conn, srv, service.NewLogged(local)
 	return nil
 }
 
@@ -148,7 +156,14 @@ func (a *App) deactivate() {
 	a.token, a.user = "", nil
 }
 
+// service returns the service for one user action with its own op id.
 func (a *App) service() (service.Service, string, error) {
+	return a.serviceOp(applog.NewOpID())
+}
+
+// serviceOp returns the service with every call logged under op, so all steps
+// of one action (one click) share it, also in the server log.
+func (a *App) serviceOp(op string) (service.Service, string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.svc == nil {
@@ -157,7 +172,11 @@ func (a *App) service() (service.Service, string, error) {
 		}
 		return nil, "", errors.New("Aplikasi belum diatur")
 	}
-	return a.svc, a.token, nil
+	svc := a.svc
+	if l, ok := svc.(*service.Logged); ok {
+		svc = l.WithOp(op)
+	}
+	return svc, a.token, nil
 }
 
 func (a *App) check(err error) error {
@@ -167,6 +186,18 @@ func (a *App) check(err error) error {
 		a.mu.Unlock()
 	}
 	return err
+}
+
+// record logs an action done on this PC with its op, session and user.
+// It must not be called while holding a.mu.
+func (a *App) record(op, action string, err error, attrs ...any) {
+	a.mu.Lock()
+	user, token := "-", a.token
+	if a.user != nil {
+		user = a.user.Username
+	}
+	a.mu.Unlock()
+	applog.Action(action, err, append([]any{"op", op, "sess", applog.SessionID(token), "user", user}, attrs...)...)
 }
 
 func lanAddresses() []string {
@@ -236,8 +267,9 @@ func cleanTerminal(terminal string) (string, error) {
 	return terminal, nil
 }
 
-func (a *App) SetupServer(port int, terminal string) error {
-	terminal, err := cleanTerminal(terminal)
+func (a *App) SetupServer(port int, terminal string) (err error) {
+	defer func() { applog.Action("SetupServer", err, "port", port, "terminal", terminal) }()
+	terminal, err = cleanTerminal(terminal)
 	if err != nil {
 		return err
 	}
@@ -256,14 +288,16 @@ func (a *App) SetupServer(port int, terminal string) error {
 		return err
 	}
 	a.startErr = ""
+	applog.SetTerminal(terminal)
 	return config.Save(a.dataDir, a.cfg)
 }
 
-func (a *App) TestServer(serverURL string) (model.Status, error) {
+func (a *App) TestServer(serverURL string) (st model.Status, err error) {
+	defer func() { applog.Action("TestServer", err, "server", serverURL, "serverVersion", st.Version) }()
 	if strings.TrimSpace(serverURL) == "" {
 		return model.Status{}, model.Invalid("Alamat server wajib diisi")
 	}
-	st, err := service.NewRemote(serverURL, appVersion).Status()
+	st, err = service.NewRemote(serverURL, appVersion).Status()
 	if err != nil {
 		return st, err
 	}
@@ -273,8 +307,9 @@ func (a *App) TestServer(serverURL string) (model.Status, error) {
 	return st, nil
 }
 
-func (a *App) SetupClient(serverURL, terminal string) error {
-	terminal, err := cleanTerminal(terminal)
+func (a *App) SetupClient(serverURL, terminal string) (err error) {
+	defer func() { applog.Action("SetupClient", err, "server", serverURL, "terminal", terminal) }()
+	terminal, err = cleanTerminal(terminal)
 	if err != nil {
 		return err
 	}
@@ -285,6 +320,7 @@ func (a *App) SetupClient(serverURL, terminal string) error {
 	defer a.mu.Unlock()
 	a.deactivate()
 	a.cfg.Mode, a.cfg.ServerURL, a.cfg.Terminal = config.ModeClient, service.NormalizeServerURL(serverURL), terminal
+	applog.SetTerminal(terminal)
 	if err := a.activate(); err != nil {
 		return err
 	}
@@ -292,9 +328,14 @@ func (a *App) SetupClient(serverURL, terminal string) error {
 	return config.Save(a.dataDir, a.cfg)
 }
 
-func (a *App) ResetSetup() error {
+func (a *App) ResetSetup() (err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	user := "-"
+	if a.user != nil {
+		user = a.user.Username
+	}
+	defer func() { applog.Action("ResetSetup", err, "user", user) }()
 	if a.user != nil && a.user.Role != model.RoleAdmin {
 		return model.ErrForbidden
 	}
@@ -468,8 +509,12 @@ func (a *App) Report(q model.ReportQuery) (model.Report, error) {
 
 // ExportReport saves the report as "pdf" or "xlsx" through a save dialog and
 // opens the file. It returns the saved path, or "" when the dialog was cancelled.
-func (a *App) ExportReport(q model.ReportQuery, format string) (string, error) {
-	svc, token, err := a.service()
+func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err error) {
+	op := applog.NewOpID()
+	defer func() {
+		a.record(op, "ExportReport", err, "format", format, "from", q.From, "to", q.To, "path", path, "cancelled", err == nil && path == "")
+	}()
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return "", err
 	}
@@ -506,7 +551,7 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (string, error) {
 		return "", err
 	}
 
-	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+	path, err = wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
 		Title:           "Simpan Laporan",
 		DefaultFilename: export.FileName(report, format),
 		Filters:         []wruntime.FileFilter{filter},
@@ -521,7 +566,7 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (string, error) {
 		return "", fmt.Errorf("gagal menyimpan laporan: %w", err)
 	}
 	if err := browser.OpenFile(path); err != nil {
-		log.Printf("open %s: %v", path, err)
+		slog.Warn("OpenFile", "path", path, "error", err.Error())
 	}
 	return path, nil
 }
@@ -557,11 +602,11 @@ func (a *App) paperWidth() int {
 	return a.cfg.PaperWidth
 }
 
-func (a *App) logo(st model.Settings) (*receipt.Bitmap, error) {
+func (a *App) logo(op string, st model.Settings) (*receipt.Bitmap, error) {
 	if !st.HasLogo {
 		return nil, nil
 	}
-	svc, token, err := a.service()
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return nil, err
 	}
@@ -576,16 +621,20 @@ func (a *App) logo(st model.Settings) (*receipt.Bitmap, error) {
 	return receipt.PrepareLogo(raw, a.paperWidth())
 }
 
-func (a *App) receiptFor(saleID int64) (model.Sale, []receipt.Line, *receipt.Bitmap, error) {
-	sale, err := a.GetSale(saleID)
+func (a *App) receiptFor(op string, saleID int64) (model.Sale, []receipt.Line, *receipt.Bitmap, error) {
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
-		return sale, nil, nil, err
+		return model.Sale{}, nil, nil, err
 	}
-	st, err := a.GetSettings()
+	sale, err := svc.GetSale(token, saleID)
 	if err != nil {
-		return sale, nil, nil, err
+		return sale, nil, nil, a.check(err)
 	}
-	logo, err := a.logo(st)
+	st, err := svc.GetSettings(token)
+	if err != nil {
+		return sale, nil, nil, a.check(err)
+	}
+	logo, err := a.logo(op, st)
 	if err != nil {
 		return sale, nil, nil, fmt.Errorf("Gagal memuat logo: %w", err)
 	}
@@ -604,7 +653,7 @@ func logoDataURL(logo *receipt.Bitmap) string {
 }
 
 func (a *App) ReceiptPreview(saleID int64) (ReceiptView, error) {
-	sale, lines, logo, err := a.receiptFor(saleID)
+	sale, lines, logo, err := a.receiptFor(applog.NewOpID(), saleID)
 	if err != nil {
 		return ReceiptView{}, err
 	}
@@ -637,19 +686,23 @@ func (a *App) printBytes(data []byte) (string, error) {
 	return "Nota dikirim ke " + name, nil
 }
 
-func (a *App) PrintReceipt(saleID int64) (string, error) {
-	sale, lines, logo, err := a.receiptFor(saleID)
+func (a *App) PrintReceipt(saleID int64) (msg string, err error) {
+	op := applog.NewOpID()
+	var invoice string
+	defer func() { a.record(op, "PrintReceipt", err, "sale", saleID, "invoice", invoice, "result", msg) }()
+	sale, lines, logo, err := a.receiptFor(op, saleID)
+	invoice = sale.InvoiceNo
 	if err != nil {
 		return "", err
 	}
 	if sale.DeletedAt != nil {
 		return "", model.Invalid("Nota sudah dihapus, tidak bisa dicetak")
 	}
-	msg, err := a.printBytes(receipt.ESCPOS(lines, logo))
+	msg, err = a.printBytes(receipt.ESCPOS(lines, logo))
 	if err != nil {
 		return "", err
 	}
-	svc, token, err := a.service()
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return msg, err
 	}
@@ -662,12 +715,16 @@ func (a *App) PrintReceipt(saleID int64) (string, error) {
 	return msg, nil
 }
 
-func (a *App) PrintTest() (string, error) {
-	st, err := a.GetSettings()
-	if err != nil {
-		st = model.Settings{}
+func (a *App) PrintTest() (msg string, err error) {
+	op := applog.NewOpID()
+	defer func() { a.record(op, "PrintTest", err, "result", msg) }()
+	st := model.Settings{}
+	if svc, token, svcErr := a.serviceOp(op); svcErr == nil {
+		if got, stErr := svc.GetSettings(token); stErr == nil {
+			st = got
+		}
 	}
-	logo, err := a.logo(st)
+	logo, err := a.logo(op, st)
 	if err != nil {
 		return "", fmt.Errorf("Gagal memuat logo: %w", err)
 	}
@@ -681,19 +738,31 @@ func (a *App) PrintTest() (string, error) {
 }
 
 func (a *App) LogoPreview() (string, error) {
-	st, err := a.GetSettings()
+	op := applog.NewOpID()
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return "", err
 	}
-	logo, err := a.logo(st)
+	st, err := svc.GetSettings(token)
+	if err != nil {
+		return "", a.check(err)
+	}
+	logo, err := a.logo(op, st)
 	if err != nil {
 		return "", err
 	}
 	return logoDataURL(logo), nil
 }
 
-func (a *App) ChooseLogo() (bool, error) {
-	path, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+func (a *App) ChooseLogo() (chosen bool, err error) {
+	op := applog.NewOpID()
+	var path string
+	defer func() {
+		if err != nil {
+			a.record(op, "ChooseLogo", err, "path", path)
+		}
+	}()
+	path, err = wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
 		Title: "Pilih logo nota",
 		Filters: []wruntime.FileFilter{
 			{DisplayName: "Gambar (*.png;*.jpg;*.jpeg;*.gif)", Pattern: "*.png;*.jpg;*.jpeg;*.gif"},
@@ -716,15 +785,15 @@ func (a *App) ChooseLogo() (bool, error) {
 	if err := receipt.ValidateLogo(data); err != nil {
 		return false, model.Invalid(err.Error())
 	}
-	return true, a.saveLogo(base64.StdEncoding.EncodeToString(data))
+	return true, a.saveLogo(op, base64.StdEncoding.EncodeToString(data))
 }
 
 func (a *App) RemoveLogo() error {
-	return a.saveLogo("")
+	return a.saveLogo(applog.NewOpID(), "")
 }
 
-func (a *App) saveLogo(data string) error {
-	svc, token, err := a.service()
+func (a *App) saveLogo(op, data string) error {
+	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return err
 	}
@@ -735,8 +804,11 @@ func (a *App) ListPrinters() ([]string, error) {
 	return printer.List(a.dataDir)
 }
 
-func (a *App) SaveLocalSettings(printerName string, paperWidth int, terminal, invoiceCode string) error {
-	terminal, err := cleanTerminal(terminal)
+func (a *App) SaveLocalSettings(printerName string, paperWidth int, terminal, invoiceCode string) (err error) {
+	defer func() {
+		a.record(applog.NewOpID(), "SaveLocalSettings", err, "printer", printerName, "paperWidth", paperWidth, "terminal", terminal, "invoiceCode", invoiceCode)
+	}()
+	terminal, err = cleanTerminal(terminal)
 	if err != nil {
 		return err
 	}
@@ -750,6 +822,7 @@ func (a *App) SaveLocalSettings(printerName string, paperWidth int, terminal, in
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfg.PrinterName, a.cfg.PaperWidth, a.cfg.Terminal, a.cfg.InvoiceCode = printerName, paperWidth, terminal, code
+	applog.SetTerminal(terminal)
 	return config.Save(a.dataDir, a.cfg)
 }
 
@@ -758,7 +831,11 @@ func (a *App) CheckUpdate() (updater.Info, error) {
 	defer cancel()
 	info, m, err := updater.Check(ctx, appVersion)
 	if err != nil {
+		slog.Warn("CheckUpdate", "error", err.Error())
 		return info, err
+	}
+	if info.Available {
+		slog.Info("CheckUpdate", "current", appVersion, "latest", info.Latest)
 	}
 	a.mu.Lock()
 	if info.Available {
@@ -770,7 +847,8 @@ func (a *App) CheckUpdate() (updater.Info, error) {
 	return info, nil
 }
 
-func (a *App) ApplyUpdate() error {
+func (a *App) ApplyUpdate() (err error) {
+	defer func() { a.record(applog.NewOpID(), "ApplyUpdate", err) }()
 	a.mu.Lock()
 	m := a.pendingUpdate
 	a.mu.Unlock()
@@ -779,7 +857,7 @@ func (a *App) ApplyUpdate() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	if err := updater.DownloadAndApply(ctx, *m); err != nil {
+	if err = updater.DownloadAndApply(ctx, *m); err != nil {
 		return err
 	}
 	if err := updater.Restart(afterUpdateFlag); err != nil {

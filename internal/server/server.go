@@ -3,11 +3,14 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"tiket/internal/applog"
 	"tiket/internal/model"
+	"tiket/internal/money"
 	"tiket/internal/service"
 	"tiket/internal/version"
 )
@@ -38,6 +41,56 @@ type ListTicketsRequest struct {
 
 type Empty struct{}
 
+// Requests from client PCs are logged on the server under the client's
+// X-Op-ID and the session derived from the token. Reads are only logged when they fail. Successful actions log
+// a short summary; failed ones log the whole body with passwords masked.
+const HeaderOpID = "X-Op-ID"
+
+var (
+	readRoutes  = map[string]bool{"me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
+	summaryKeys = []string{"id", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted"}
+)
+
+func requestUser(svc service.Service, token string, out any) string {
+	if sess, ok := out.(model.Session); ok && sess.Token != "" {
+		return sess.User.Username
+	}
+	if token == "" {
+		return "-"
+	}
+	u, err := svc.Me(token)
+	if err != nil {
+		return "-"
+	}
+	return u.Username
+}
+
+// summary picks the identifying fields of a request and its result.
+func summary(body []byte, out any) []any {
+	var attrs []any
+	var in map[string]any
+	if json.Unmarshal(body, &in) == nil {
+		for _, k := range summaryKeys {
+			if v, ok := in[k]; ok && v != "" {
+				attrs = append(attrs, k, v)
+			}
+		}
+	}
+	switch o := out.(type) {
+	case model.Sale:
+		attrs = append(attrs, "invoice", o.InvoiceNo, "total", money.Format(o.Total))
+	case []model.Sale:
+		attrs = append(attrs, "count", len(o))
+	case model.Report:
+		attrs = append(attrs, "total", money.Format(o.Total))
+	case model.Ticket:
+		attrs = append(attrs, "ticket", o.ID)
+	case model.User:
+		attrs = append(attrs, "userId", o.ID)
+	}
+	return attrs
+}
+
 type LogoBody struct {
 	Data string `json:"data"`
 }
@@ -51,8 +104,20 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 
 	route := func(name string, fn func(token string, body []byte) (any, error)) {
 		mux.HandleFunc("POST /api/"+name, func(w http.ResponseWriter, r *http.Request) {
+			action := "remote:" + name
+			op := r.Header.Get(HeaderOpID)
+			if op == "" {
+				op = applog.NewOpID()
+			}
+			defer func() {
+				if p := recover(); p != nil {
+					applog.Action(action, fmt.Errorf("panic: %v", p), "op", op, "client", r.RemoteAddr)
+					writeError(w, http.StatusInternalServerError, ErrorBody{Code: "internal", Error: "Terjadi kesalahan di server"})
+				}
+			}()
 			clientVersion := r.Header.Get(HeaderVersion)
 			if !version.Compatible(clientVersion, serverVersion) {
+				applog.Action(action, model.ErrVersionMismatch, "op", op, "client", r.RemoteAddr, "clientVersion", clientVersion)
 				writeError(w, http.StatusConflict, ErrorBody{
 					Code:  "version_mismatch",
 					Error: "Versi aplikasi (" + clientVersion + ") tidak cocok dengan server (" + serverVersion + "). Silakan update aplikasi.",
@@ -64,13 +129,36 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 				dec := http.MaxBytesReader(w, r.Body, maxBodyBytes)
 				var raw json.RawMessage
 				if err := json.NewDecoder(dec).Decode(&raw); err != nil {
+					applog.Action(action, model.Invalid("Request tidak valid"), "op", op, "client", r.RemoteAddr, "decodeError", err.Error())
 					writeError(w, http.StatusBadRequest, ErrorBody{Code: "invalid", Error: "Request tidak valid"})
 					return
 				}
 				body = raw
 			}
 			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			// Look the user up before the call so logout still knows who it was.
+			user := ""
+			if name != "login" {
+				user = requestUser(svc, token, nil)
+			}
+			start := time.Now()
 			out, err := fn(token, body)
+			if !readRoutes[name] || err != nil {
+				if user == "" {
+					user = requestUser(svc, token, out)
+				}
+				sess := token
+				if s, ok := out.(model.Session); ok && s.Token != "" {
+					sess = s.Token
+				}
+				attrs := []any{"op", op, "sess", applog.SessionID(sess), "user", user, "client", r.RemoteAddr, "ms", time.Since(start).Milliseconds()}
+				if err != nil && len(body) > 0 {
+					attrs = append(attrs, "input", applog.PayloadJSON(body))
+				} else {
+					attrs = append(attrs, summary(body, out)...)
+				}
+				applog.Action(action, err, attrs...)
+			}
 			respond(w, out, err)
 		})
 	}
@@ -167,7 +255,6 @@ func respond(w http.ResponseWriter, out any, err error) {
 		case errors.As(err, &ve):
 			writeError(w, http.StatusBadRequest, ErrorBody{Code: "invalid", Error: ve.Message})
 		default:
-			log.Printf("server error: %v", err)
 			writeError(w, http.StatusInternalServerError, ErrorBody{Code: "internal", Error: "Terjadi kesalahan di server"})
 		}
 		return

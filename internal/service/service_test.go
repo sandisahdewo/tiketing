@@ -6,11 +6,15 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"log/slog"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"tiket/internal/applog"
 	"tiket/internal/db"
 	"tiket/internal/model"
 	"tiket/internal/server"
@@ -449,5 +453,56 @@ func TestKasirReportAndDeleteSale(t *testing.T) {
 	next := sell(kasir, 1)
 	if next.InvoiceNo != "TKT202610050004" {
 		t.Errorf("invoice number reused after delete: %s", next.InvoiceNo)
+	}
+}
+
+func TestLoggedOpSessionAndPayload(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	defer slog.SetDefault(prev)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewLogged(NewRemote(srv.URL, testVersion))
+	admin, _ := setup(t, svc)
+
+	buf.Reset()
+	if _, err := svc.SaveUser(admin, model.UserInput{Username: "x", FullName: "X", Role: model.RoleKasir, Password: "rahasia"}); err == nil {
+		t.Fatal("short username accepted")
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want one server and one client line, got:\n%s", buf.String())
+	}
+	server, client := lines[0], lines[1]
+	op := regexp.MustCompile(`op=(\w+)`).FindStringSubmatch(client)
+	if op == nil || !strings.Contains(server, "op="+op[1]) {
+		t.Errorf("op not shared:\nserver: %s\nclient: %s", server, client)
+	}
+	sess := "sess=" + applog.SessionID(admin)
+	if !strings.Contains(client, sess) || !strings.Contains(server, sess) || strings.Contains(buf.String(), admin) {
+		t.Errorf("both sides should log the session id but never the token:\n%s", buf.String())
+	}
+	for _, l := range lines {
+		if !strings.Contains(l, "level=WARN") || !strings.Contains(l, `\"username\":\"x\"`) || !strings.Contains(l, `\"password\":\"***\"`) || strings.Contains(l, "rahasia") {
+			t.Errorf("failed action should log masked input: %s", l)
+		}
+	}
+
+	buf.Reset()
+	must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	if strings.Contains(buf.String(), "input=") || !strings.Contains(buf.String(), "msg=remote:saveTicket") || !strings.Contains(buf.String(), "name=Entry") {
+		t.Errorf("successful action should log a summary only:\n%s", buf.String())
+	}
+
+	// All steps of one action share its op, on this PC and on the server.
+	buf.Reset()
+	scoped := svc.WithOp("klik123")
+	scoped.ListSales(admin, model.SaleQuery{From: "2026-10-05", To: "2026-10-05"})
+	scoped.Report(admin, model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-05"})
+	if n := strings.Count(buf.String(), "op=klik123"); n != 4 {
+		t.Errorf("want 4 lines (2 steps x client+server) under one op, got %d:\n%s", n, buf.String())
 	}
 }

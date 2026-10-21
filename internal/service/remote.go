@@ -12,9 +12,18 @@ import (
 )
 
 type Remote struct {
-	BaseURL string
-	Version string
-	Client  *http.Client
+	BaseURL   string
+	Version   string
+	Client    *http.Client
+	OpID    string
+}
+
+// WithOp returns a copy whose calls send op in X-Op-ID, so the server logs
+// them under the same action id as this PC.
+func (r *Remote) WithOp(op string) Service {
+	c := *r
+	c.OpID = op
+	return &c
 }
 
 func NormalizeServerURL(raw string) string {
@@ -89,6 +98,9 @@ func (r *Remote) call(name, token string, in, out any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-App-Version", r.Version)
+	if r.OpID != "" {
+		req.Header.Set("X-Op-ID", r.OpID)
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

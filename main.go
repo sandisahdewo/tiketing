@@ -5,7 +5,10 @@ import (
 	"embed"
 	"encoding/hex"
 	"log"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
+	"tiket/internal/applog"
 	"tiket/internal/config"
 )
 
@@ -32,6 +36,21 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if logger, closer, err := applog.Open(filepath.Join(dataDir, "logs")); err == nil {
+		// Also routes the standard log package into the file.
+		applog.Init(logger, appVersion)
+		defer closer.Close()
+	} else {
+		log.Printf("log file tidak bisa dibuka: %v", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Crash", "panic", r, "stack", string(debug.Stack()))
+			panic(r)
+		}
+	}()
+	slog.Info("AppStart", "dataDir", dataDir, "args", os.Args[1:])
+
 	app := NewApp(dataDir)
 	lockID := sha256.Sum256([]byte(dataDir))
 
@@ -56,6 +75,8 @@ func main() {
 		},
 	})
 	if err != nil {
+		slog.Error("AppExit", "error", err.Error())
 		log.Fatal(err)
 	}
+	slog.Info("AppExit")
 }
