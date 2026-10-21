@@ -3,6 +3,7 @@
   import SalesTable from './SalesTable.svelte'
   import Pager from './Pager.svelte'
   import LoadingOverlay from './LoadingOverlay.svelte'
+  import type { Sort } from '../lib/sort'
   import { App, model, handleError } from '../lib/api'
   import { formatRp } from '../lib/money'
 
@@ -34,6 +35,8 @@
   // highlight is applied to the first load only; later pages and searches are normal.
   let pending = untrack(() => highlight)
   let flash = $state<number | null>(null)
+  // Newest first unless the user picks a column.
+  let sort = $state<Sort>({ key: 'time', dir: 'desc' })
 
   const pageSize = 100
 
@@ -53,7 +56,7 @@
     const seq = ++requestSeq
     loading = true
     try {
-      const out = await App.SearchSales(model.SalePageQuery.createFrom({ from, to, deleted, search: appliedSearch, page, pageSize }))
+      const out = await App.SearchSales(model.SalePageQuery.createFrom({ from, to, deleted, search: appliedSearch, page, pageSize, sort: sort.key, dir: sort.dir }))
       if (seq !== requestSeq) return
       // The last page can empty out after a delete; step back to the new last page.
       if (out.sales.length === 0 && out.count > 0 && page > 1) {
@@ -103,6 +106,7 @@
     deleted
     appliedSearch
     refresh
+    sort
     untrack(() => {
       page = 1
       load()
@@ -126,7 +130,7 @@
   <div class="relative mt-2 flex min-h-0 flex-1 flex-col">
     <div class="card min-h-40 flex-1 overflow-y-auto">
       {#if result}
-        <SalesTable {sales} bind:expanded {flash} empty={appliedSearch ? 'Tidak ada transaksi yang cocok.' : emptyText} ondeleted={() => { load(); ondeleted?.() }} />
+        <SalesTable {sales} bind:expanded {flash} {sort} onsort={(s) => (sort = s)} empty={appliedSearch ? 'Tidak ada transaksi yang cocok.' : emptyText} ondeleted={() => { load(); ondeleted?.() }} />
       {/if}
     </div>
     <LoadingOverlay show={loading || waiting || !result} />

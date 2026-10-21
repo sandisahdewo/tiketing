@@ -222,11 +222,25 @@ func (s *Store) ListSales(q model.SaleQuery, userID int64) ([]model.Sale, error)
 	return s.querySales("SELECT "+saleColumns+saleFrom+where+" ORDER BY s.created_at DESC, s.id DESC", args...)
 }
 
-// SearchSales returns one page of the sales matching q plus the count and
-// amount of all of them.
-func (s *Store) SearchSales(q model.SaleQuery, userID int64, page, pageSize int) (model.SalePage, error) {
-	out := model.SalePage{Sales: []model.Sale{}, Page: page, PageSize: pageSize}
-	where, args, err := salesFilter(q, userID)
+// saleSort maps the sortable columns of the transaction list.
+var saleSort = map[string]string{
+	"time":     "s.created_at",
+	"invoice":  "s.invoice_no",
+	"cashier":  "u.full_name COLLATE NOCASE",
+	"terminal": "s.terminal COLLATE NOCASE",
+	"total":    "s.total",
+	"prints":   "(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id)",
+}
+
+// SearchSales returns one page of the sales matching q (page and size
+// already validated) plus the count and amount of all of them.
+func (s *Store) SearchSales(q model.SalePageQuery, userID int64) (model.SalePage, error) {
+	out := model.SalePage{Sales: []model.Sale{}, Page: q.Page, PageSize: q.PageSize}
+	where, args, err := salesFilter(q.SaleQuery, userID)
+	if err != nil {
+		return out, err
+	}
+	order, err := orderBy(saleSort, q.Sort, q.Dir, "s.created_at DESC, s.id DESC", "s.id")
 	if err != nil {
 		return out, err
 	}
@@ -237,8 +251,8 @@ func (s *Store) SearchSales(q model.SaleQuery, userID int64, page, pageSize int)
 	if out.Count == 0 {
 		return out, nil
 	}
-	out.Sales, err = s.querySales("SELECT "+saleColumns+saleFrom+where+" ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?",
-		append(args, pageSize, (page-1)*pageSize)...)
+	out.Sales, err = s.querySales("SELECT "+saleColumns+saleFrom+where+order+" LIMIT ? OFFSET ?",
+		append(args, q.PageSize, (q.Page-1)*q.PageSize)...)
 	return out, err
 }
 

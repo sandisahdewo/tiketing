@@ -1,6 +1,8 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import SortHeader from '../components/SortHeader.svelte'
+  import { sortRows, type Sort } from '../lib/sort'
   import { FormState, required, maxLength, username as usernameRule } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatDateTime } from '../lib/date'
@@ -8,6 +10,16 @@
   import { toast } from '../lib/toast.svelte'
 
   let users = $state<model.User[]>([])
+  // The user list is small and comes whole, so it is sorted here.
+  let sort = $state<Sort>({ key: 'username', dir: 'asc' })
+  const sortValue: Record<string, (u: model.User) => string> = {
+    username: (u) => u.username,
+    fullName: (u) => u.fullName,
+    role: (u) => u.role,
+    createdAt: (u) => u.createdAt,
+    updatedAt: (u) => u.updatedAt
+  }
+  let sortedUsers = $derived(sortRows(users, sortValue[sort.key], sort.dir))
   let loading = $state(true)
   let editing = $state<{ id: number; username: string; fullName: string; role: string; password: string } | null>(null)
   const form = new FormState(() => {
@@ -88,13 +100,20 @@
   <div class="card mt-4 min-h-0 flex-1 overflow-y-auto">
     <table class="table">
       <thead class="sticky top-0">
-        <tr><th>Username</th><th>Nama</th><th>Role</th><th>Dibuat</th><th>Diubah</th><th class="w-48"></th></tr>
+        <tr>
+          <SortHeader label="Username" key="username" {sort} onsort={(s) => (sort = s)} />
+          <SortHeader label="Nama" key="fullName" {sort} onsort={(s) => (sort = s)} />
+          <SortHeader label="Role" key="role" {sort} onsort={(s) => (sort = s)} />
+          <SortHeader label="Dibuat" key="createdAt" {sort} onsort={(s) => (sort = s)} firstDir="desc" />
+          <SortHeader label="Diubah" key="updatedAt" {sort} onsort={(s) => (sort = s)} firstDir="desc" />
+          <th class="w-48"></th>
+        </tr>
       </thead>
       <tbody>
         {#if loading && users.length === 0}
           <tr><td colspan="6" class="py-10 text-center text-slate-500">Memuat…</td></tr>
         {/if}
-        {#each users as u (u.id)}
+        {#each sortedUsers as u (u.id)}
           <tr class="hover:bg-slate-50">
             <td class="font-mono">{u.username}</td>
             <td class="font-medium">{u.fullName}{#if u.id === session.user?.id} <span class="text-xs text-slate-400">(Anda)</span>{/if}</td>

@@ -3,6 +3,8 @@
   import Modal from '../components/Modal.svelte'
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
+  import SortHeader from '../components/SortHeader.svelte'
+  import type { Sort } from '../lib/sort'
   import MoneyInput from '../components/MoneyInput.svelte'
   import Field from '../components/Field.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
@@ -50,6 +52,8 @@
   // is not already here) and blinked green, if it fits the status/category filter.
   let saved: { ticket: model.Ticket; isNew: boolean } | null = null
   let flash = $state<number | null>(null)
+  // No column means the cashier-screen order: tickets before topups, then by name.
+  let sort = $state<Sort>({ key: '', dir: 'asc' })
 
   function fitsFilter(t: model.Ticket) {
     if (status === 'deleted') return false
@@ -63,7 +67,7 @@
     const seq = ++requestSeq
     loading = true
     try {
-      const out = await App.SearchTickets(model.TicketQuery.createFrom({ search: appliedSearch, category, status, page, pageSize }))
+      const out = await App.SearchTickets(model.TicketQuery.createFrom({ search: appliedSearch, category, status, page, pageSize, sort: sort.key, dir: sort.dir }))
       if (seq !== requestSeq) return
       // The last page can empty out after a delete or status change.
       if (out.tickets.length === 0 && out.count > 0 && page > 1) {
@@ -102,6 +106,7 @@
     appliedSearch
     category
     status
+    sort
     untrack(() => {
       page = 1
       load()
@@ -203,13 +208,13 @@
     <table class="table">
       <thead class="sticky top-0">
         <tr>
-          <th>Nama</th>
-          <th>Kategori</th>
-          <th class="text-right">Harga</th>
-          {#if !showDeleted}<th>Status</th>{/if}
-          <th>Dibuat</th>
-          <th>Diubah</th>
-          {#if showDeleted}<th>Dihapus</th>{/if}
+          <SortHeader label="Nama" key="name" {sort} onsort={(s) => (sort = s)} />
+          <SortHeader label="Kategori" key="category" {sort} onsort={(s) => (sort = s)} />
+          <SortHeader label="Harga" key="price" {sort} onsort={(s) => (sort = s)} align="right" firstDir="desc" />
+          {#if !showDeleted}<SortHeader label="Status" key="active" {sort} onsort={(s) => (sort = s)} firstDir="desc" />{/if}
+          <SortHeader label="Dibuat" key="created" {sort} onsort={(s) => (sort = s)} firstDir="desc" />
+          <SortHeader label="Diubah" key="updated" {sort} onsort={(s) => (sort = s)} firstDir="desc" />
+          {#if showDeleted}<SortHeader label="Dihapus" key="deleted" {sort} onsort={(s) => (sort = s)} firstDir="desc" />{/if}
           <th class="w-72"></th>
         </tr>
       </thead>

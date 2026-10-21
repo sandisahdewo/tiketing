@@ -442,7 +442,7 @@ func (l *Local) SearchSales(token string, q model.SalePageQuery) (model.SalePage
 		q.PageSize = defaultPageSize
 	}
 	q.PageSize = min(q.PageSize, maxPageSize)
-	return l.Store.SearchSales(q.SaleQuery, userID, q.Page, q.PageSize)
+	return l.Store.SearchSales(q, userID)
 }
 
 func (l *Local) DeleteSale(token string, in model.DeleteSaleInput) error {

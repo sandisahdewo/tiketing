@@ -4,6 +4,8 @@
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import Field from '../components/Field.svelte'
+  import SortHeader from '../components/SortHeader.svelte'
+  import { sortRows, type Sort } from '../lib/sort'
   import { FormState, required } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatRp } from '../lib/money'
@@ -52,10 +54,40 @@
   // Bumped on every "Tampilkan" so the transaction list reloads too.
   let salesRefresh = $state(0)
 
+  // Both tabs come whole with the report, so they are sorted here: sorting on
+  // the server would recompute the whole report on every click.
+  let periodSort = $state<Sort>({ key: 'period', dir: 'asc' })
+  let itemSort = $state<Sort>({ key: 'total', dir: 'desc' })
+  const periodValue: Record<string, (r: model.ReportRow) => string | number> = {
+    period: (r) => r.period,
+    transactions: (r) => r.transactions,
+    ticketQty: (r) => r.ticketQty,
+    ticketTotal: (r) => r.ticketTotal,
+    topupQty: (r) => r.topupQty,
+    topupTotal: (r) => r.topupTotal,
+    total: (r) => r.total
+  }
+  const itemValue: Record<string, (t: model.ReportTicketRow) => string | number> = {
+    name: (t) => t.ticketName,
+    qty: (t) => t.qty,
+    total: (t) => t.total
+  }
+
+  function sortPeriods(s: Sort) {
+    periodSort = s
+    periodPage = 1
+  }
+
+  function sortItems(s: Sort) {
+    itemSort = s
+    itemPage = 1
+  }
+
+  // Items stay grouped by category; the sort applies within each group.
   let itemGroups = $derived(
     categories
       .map((c) => {
-        const items = report?.tickets.filter((t) => t.category === c.value) ?? []
+        const items = sortRows(report?.tickets.filter((t) => t.category === c.value) ?? [], itemValue[itemSort.key], itemSort.dir)
         return {
           label: c.label,
           items,
@@ -71,7 +103,8 @@
   const tabPageSize = 50
   let periodPage = $state(1)
   let itemPage = $state(1)
-  let periodRows = $derived(report?.rows.slice((periodPage - 1) * tabPageSize, periodPage * tabPageSize) ?? [])
+  let sortedPeriods = $derived(sortRows(report?.rows ?? [], periodValue[periodSort.key], periodSort.dir))
+  let periodRows = $derived(sortedPeriods.slice((periodPage - 1) * tabPageSize, periodPage * tabPageSize))
   let itemRows = $derived(
     itemGroups.flatMap((g) => g.items.map((item, i) => ({ item, group: g, first: i === 0, last: i === g.items.length - 1 })))
   )
@@ -236,7 +269,15 @@
       {:else if tab === 'period'}
         <table class="table">
           <thead class="sticky top-0">
-            <tr><th>Periode</th><th class="text-right">Transaksi</th><th class="text-right">Tiket</th><th class="text-right">Rp Tiket</th><th class="text-right">Topup</th><th class="text-right">Rp Topup</th><th class="text-right">Total</th></tr>
+            <tr>
+              <SortHeader label="Periode" key="period" sort={periodSort} onsort={sortPeriods} />
+              <SortHeader label="Transaksi" key="transactions" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+              <SortHeader label="Tiket" key="ticketQty" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+              <SortHeader label="Rp Tiket" key="ticketTotal" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+              <SortHeader label="Topup" key="topupQty" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+              <SortHeader label="Rp Topup" key="topupTotal" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+              <SortHeader label="Total" key="total" sort={periodSort} onsort={sortPeriods} align="right" firstDir="desc" />
+            </tr>
           </thead>
           <tbody>
             {#each periodRows as r}
@@ -269,7 +310,13 @@
         </table>
       {:else if tab === 'ticket'}
         <table class="table">
-          <thead class="sticky top-0"><tr><th>Item</th><th class="text-right">Terjual</th><th class="text-right">Total</th></tr></thead>
+          <thead class="sticky top-0">
+            <tr>
+              <SortHeader label="Item" key="name" sort={itemSort} onsort={sortItems} />
+              <SortHeader label="Terjual" key="qty" sort={itemSort} onsort={sortItems} align="right" firstDir="desc" />
+              <SortHeader label="Total" key="total" sort={itemSort} onsort={sortItems} align="right" firstDir="desc" />
+            </tr>
+          </thead>
           <tbody>
             {#each itemPageRows as row, i (row.item.ticketId)}
               {#if i === 0 || row.first}

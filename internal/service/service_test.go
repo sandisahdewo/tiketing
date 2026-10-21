@@ -677,3 +677,82 @@ func TestSearchTickets(t *testing.T) {
 		t.Error("invalid status accepted")
 	}
 }
+
+func TestSorting(t *testing.T) {
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+
+	cheap := must(svc.SaveTicket(admin, model.TicketInput{Name: "b murah", Price: 100000}))
+	pricey := must(svc.SaveTicket(admin, model.TicketInput{Name: "A mahal", Price: 900000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "C topup", Price: 500000, Category: model.CategoryTopup}))
+
+	names := func(q model.TicketQuery) string {
+		var out []string
+		for _, tk := range must(svc.SearchTickets(admin, q)).Tickets {
+			out = append(out, tk.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tc := range []struct {
+		q    model.TicketQuery
+		want string
+	}{
+		{model.TicketQuery{}, "A mahal,b murah,C topup"}, // default: category, then name
+		{model.TicketQuery{Sort: "price", Dir: "desc"}, "A mahal,C topup,b murah"},
+		{model.TicketQuery{Sort: "price"}, "b murah,C topup,A mahal"},
+		{model.TicketQuery{Sort: "name", Dir: "desc"}, "C topup,b murah,A mahal"}, // case-insensitive
+	} {
+		if got := names(tc.q); got != tc.want {
+			t.Errorf("tickets %+v: got %s, want %s", tc.q, got, tc.want)
+		}
+	}
+
+	sell := func(token string, id int64, qty int64, price int64) model.Sale {
+		return must(svc.CreateSale(token, model.SaleInput{Items: []model.SaleItemInput{{TicketID: id, Qty: qty}}, Paid: qty * price}))
+	}
+	s1 := sell(kasir, cheap.ID, 1, 100000)  // 1.000, Budi
+	s2 := sell(admin, pricey.ID, 1, 900000) // 9.000, Pak Admin
+	s3 := sell(kasir, topup.ID, 1, 500000)  // 5.000, Budi
+	must(0, svc.RecordPrint(admin, model.PrintInput{SaleID: s1.ID}))
+	must(0, svc.RecordPrint(admin, model.PrintInput{SaleID: s1.ID}))
+	must(0, svc.RecordPrint(admin, model.PrintInput{SaleID: s3.ID}))
+
+	ids := func(sort, dir string) []int64 {
+		q := model.SalePageQuery{SaleQuery: model.SaleQuery{From: "2026-10-05", To: "2026-10-05"}, Sort: sort, Dir: dir}
+		var out []int64
+		for _, s := range must(svc.SearchSales(admin, q)).Sales {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		sort, dir string
+		want      []int64
+	}{
+		{"", "", []int64{s3.ID, s2.ID, s1.ID}}, // newest first (same second: by id)
+		{"total", "asc", []int64{s1.ID, s3.ID, s2.ID}},
+		{"total", "desc", []int64{s2.ID, s3.ID, s1.ID}},
+		{"prints", "desc", []int64{s1.ID, s3.ID, s2.ID}},
+		{"cashier", "asc", []int64{s1.ID, s3.ID, s2.ID}}, // Budi before Pak Admin, ties by id
+		{"invoice", "desc", []int64{s3.ID, s2.ID, s1.ID}},
+	} {
+		if got := ids(tc.sort, tc.dir); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Errorf("sales sort %s %s: got %v, want %v", tc.sort, tc.dir, got, tc.want)
+		}
+	}
+
+	for _, q := range []model.SalePageQuery{
+		{SaleQuery: model.SaleQuery{From: "2026-10-05", To: "2026-10-05"}, Sort: "s.total; DROP TABLE sales"},
+		{SaleQuery: model.SaleQuery{From: "2026-10-05", To: "2026-10-05"}, Sort: "total", Dir: "sideways"},
+	} {
+		if _, err := svc.SearchSales(admin, q); err == nil {
+			t.Errorf("invalid sort %+v accepted", q)
+		}
+	}
+	if _, err := svc.SearchTickets(admin, model.TicketQuery{Sort: "password"}); err == nil {
+		t.Error("invalid ticket sort accepted")
+	}
+}

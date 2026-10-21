@@ -48,8 +48,19 @@ func (s *Store) ListTickets(search string, deleted, activeOnly bool) ([]model.Ti
 	return tickets, rows.Err()
 }
 
+// ticketSort maps the sortable columns of the ticket master list.
+var ticketSort = map[string]string{
+	"name":     "name COLLATE NOCASE",
+	"category": "category",
+	"price":    "price",
+	"active":   "active",
+	"created":  "created_at",
+	"updated":  "updated_at",
+	"deleted":  "deleted_at",
+}
+
 // SearchTickets returns one page of tickets matching q (already validated),
-// ordered as on the cashier screen: tickets before topups, then by name.
+// by default ordered as on the cashier screen: tickets before topups, then by name.
 func (s *Store) SearchTickets(q model.TicketQuery) (model.TicketPage, error) {
 	out := model.TicketPage{Tickets: []model.Ticket{}, Page: q.Page, PageSize: q.PageSize}
 	where := " WHERE deleted_at IS NULL"
@@ -70,10 +81,14 @@ func (s *Store) SearchTickets(q model.TicketQuery) (model.TicketPage, error) {
 		where += ` AND name LIKE ? ESCAPE '\'`
 		args = append(args, likePattern(search))
 	}
+	order, err := orderBy(ticketSort, q.Sort, q.Dir, "category, name, id", "id")
+	if err != nil {
+		return out, err
+	}
 	if err := s.DB.QueryRow("SELECT COUNT(*) FROM tickets"+where, args...).Scan(&out.Count); err != nil || out.Count == 0 {
 		return out, err
 	}
-	rows, err := s.DB.Query("SELECT "+ticketColumns+" FROM tickets"+where+" ORDER BY category, name, id LIMIT ? OFFSET ?",
+	rows, err := s.DB.Query("SELECT "+ticketColumns+" FROM tickets"+where+order+" LIMIT ? OFFSET ?",
 		append(args, q.PageSize, (q.Page-1)*q.PageSize)...)
 	if err != nil {
 		return out, err

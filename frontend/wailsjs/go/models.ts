@@ -335,6 +335,8 @@ export namespace model {
 	    search: string;
 	    page: number;
 	    pageSize: number;
+	    sort: string;
+	    dir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SalePageQuery(source);
@@ -348,6 +350,8 @@ export namespace model {
 	        this.search = source["search"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
+	        this.sort = source["sort"];
+	        this.dir = source["dir"];
 	    }
 	}
 	export class SaleQuery {
@@ -496,6 +500,8 @@ export namespace model {
 	    status: string;
 	    page: number;
 	    pageSize: number;
+	    sort: string;
+	    dir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TicketQuery(source);
@@ -508,6 +514,8 @@ export namespace model {
 	        this.status = source["status"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
+	        this.sort = source["sort"];
+	        this.dir = source["dir"];
 	    }
 	}
 	export class User {

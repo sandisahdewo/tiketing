@@ -55,12 +55,16 @@ const (
 
 // TicketQuery asks for one page of tickets. Status is one of the Ticket*
 // constants (empty means all non-deleted); Category is empty for both.
+// Sort is a column key (empty: tickets before topups, then by name) and Dir
+// is "asc" or "desc".
 type TicketQuery struct {
 	Search   string `json:"search"`
 	Category string `json:"category"`
 	Status   string `json:"status"`
 	Page     int    `json:"page"`
 	PageSize int    `json:"pageSize"`
+	Sort     string `json:"sort"`
+	Dir      string `json:"dir"`
 }
 
 // TicketPage is one page of tickets plus the number of all matches.
@@ -148,12 +152,20 @@ type SaleQuery struct {
 	Search  string `json:"search"`
 }
 
-// SalePageQuery asks for one page of sales; Page starts at 1.
+// SalePageQuery asks for one page of sales; Page starts at 1. Sort is one of
+// the SaleSort* keys (empty: newest first) and Dir is "asc" or "desc".
 type SalePageQuery struct {
 	SaleQuery
-	Page     int `json:"page"`
-	PageSize int `json:"pageSize"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Sort     string `json:"sort"`
+	Dir      string `json:"dir"`
 }
+
+const (
+	SortAsc  = "asc"
+	SortDesc = "desc"
+)
 
 // SalePage is one page of sales plus the count and amount of every match.
 type SalePage struct {

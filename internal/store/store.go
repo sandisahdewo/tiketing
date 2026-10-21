@@ -41,6 +41,27 @@ func likePattern(search string) string {
 	return "%" + likeEscaper.Replace(strings.TrimSpace(search)) + "%"
 }
 
+// orderBy builds an ORDER BY clause from a whitelisted sort key, falling back
+// to def when key is empty. The id column breaks ties so paging stays stable.
+func orderBy(columns map[string]string, key, dir, def, id string) (string, error) {
+	if key == "" {
+		return " ORDER BY " + def, nil
+	}
+	expr, ok := columns[key]
+	if !ok {
+		return "", model.Invalid("Kolom urutan tidak valid")
+	}
+	switch dir {
+	case "", model.SortAsc:
+		dir = "ASC"
+	case model.SortDesc:
+		dir = "DESC"
+	default:
+		return "", model.Invalid("Arah urutan tidak valid")
+	}
+	return " ORDER BY " + expr + " " + dir + ", " + id + " " + dir, nil
+}
+
 func likePrefix(prefix string) string {
 	return likeEscaper.Replace(prefix) + "%"
 }

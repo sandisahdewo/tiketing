@@ -1,6 +1,8 @@
 <script lang="ts">
   import Modal from './Modal.svelte'
   import Field from './Field.svelte'
+  import SortHeader from './SortHeader.svelte'
+  import type { Sort } from '../lib/sort'
   import { FormState, required, maxLength } from '../lib/form.svelte'
   import ReceiptModal from './ReceiptModal.svelte'
   import { App, model, errorMessage } from '../lib/api'
@@ -16,6 +18,8 @@
     expanded = $bindable({}),
     empty = 'Tidak ada transaksi.',
     flash = null,
+    sort,
+    onsort,
     ondeleted
   }: {
     sales: model.Sale[]
@@ -23,6 +27,9 @@
     empty?: string
     // id of a sale whose row blinks green (just added)
     flash?: number | null
+    // current sort and how to change it (sorting happens on the server)
+    sort: Sort
+    onsort: (sort: Sort) => void
     ondeleted?: () => void
   } = $props()
 
@@ -61,7 +68,18 @@
 </script>
 
 <table class="table">
-  <thead class="sticky top-0"><tr><th class="w-8"></th><th>Waktu</th><th>No. Nota</th><th>Kasir</th><th>Loket</th><th class="text-right">Total</th><th class="text-center">Cetak</th><th></th></tr></thead>
+  <thead class="sticky top-0">
+    <tr>
+      <th class="w-8"></th>
+      <SortHeader label="Waktu" key="time" {sort} {onsort} firstDir="desc" />
+      <SortHeader label="No. Nota" key="invoice" {sort} {onsort} />
+      <SortHeader label="Kasir" key="cashier" {sort} {onsort} />
+      <SortHeader label="Loket" key="terminal" {sort} {onsort} />
+      <SortHeader label="Total" key="total" {sort} {onsort} align="right" firstDir="desc" />
+      <SortHeader label="Cetak" key="prints" {sort} {onsort} align="center" firstDir="desc" />
+      <th></th>
+    </tr>
+  </thead>
   <tbody>
     {#each sales as s (s.id)}
       <tr class="cursor-pointer hover:bg-slate-50 {s.deletedAt ? 'text-slate-400' : ''} {s.id === flash ? 'row-flash' : ''}" onclick={() => (expanded[s.id] = !expanded[s.id])}>
