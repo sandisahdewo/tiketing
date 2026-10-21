@@ -3,6 +3,7 @@
   import PaymentModal from './PaymentModal.svelte'
   import ReceiptModal from '../components/ReceiptModal.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
+  import { session, isAdmin } from '../lib/session.svelte'
   import { App, model, handleError } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
   import { colorClass } from '../lib/colors'
@@ -169,6 +170,12 @@
 
 <div class="flex h-full gap-4 p-4">
   <section class="flex min-w-0 flex-1 flex-col">
+    {#if session.info && !session.info.terminal}
+      <p class="mb-3 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <b>Komputer ini belum punya loket</b>, jadi belum bisa bertransaksi.
+        {isAdmin() ? 'Pilih loket di menu Pengaturan atau Loket.' : 'Minta admin memilih loket untuk komputer ini.'}
+      </p>
+    {/if}
     <div class="flex gap-2">
       <div class="relative flex-1">
         <svg class="pointer-events-none absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>

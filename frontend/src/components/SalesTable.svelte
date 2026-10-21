@@ -87,7 +87,7 @@
         <td>{formatDateTime(s.createdAt)}</td>
         <td class="font-mono {s.deletedAt ? 'line-through' : ''}">{s.invoiceNo}</td>
         <td>{s.cashierName}</td>
-        <td>{s.terminal}</td>
+        <td>{s.counterName || s.terminal}</td>
         <td class="text-right font-medium {s.deletedAt ? 'line-through' : ''}">{formatRp(s.total)}</td>
         <td class="text-center text-slate-500">{s.printCount}×</td>
         <td class="whitespace-nowrap text-right">

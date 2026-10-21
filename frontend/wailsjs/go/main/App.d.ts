@@ -38,6 +38,8 @@ export function GetSale(arg1:number):Promise<model.Sale>;
 
 export function GetSettings():Promise<model.Settings>;
 
+export function ListCounters():Promise<Array<model.Counter>>;
+
 export function ListPrinters():Promise<Array<string>>;
 
 export function ListSales(arg1:model.SaleQuery):Promise<Array<model.Sale>>;
@@ -52,11 +54,15 @@ export function LogoPreview():Promise<string>;
 
 export function Logout():Promise<void>;
 
+export function MyCounter():Promise<model.Counter>;
+
 export function PrintReceipt(arg1:number):Promise<string>;
 
 export function PrintTest():Promise<string>;
 
 export function ReceiptPreview(arg1:number):Promise<main.ReceiptView>;
+
+export function ReleaseCounter(arg1:string):Promise<void>;
 
 export function RemoveLogo():Promise<void>;
 
@@ -70,7 +76,9 @@ export function RestoreDatabase():Promise<void>;
 
 export function RestoreTicket(arg1:number):Promise<void>;
 
-export function SaveLocalSettings(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
+export function SaveCounter(arg1:model.CounterInput):Promise<model.Counter>;
+
+export function SaveLocalSettings(arg1:string,arg2:number):Promise<void>;
 
 export function SaveSettings(arg1:model.Settings):Promise<void>;
 
@@ -82,12 +90,16 @@ export function SearchSales(arg1:model.SalePageQuery):Promise<model.SalePage>;
 
 export function SearchTickets(arg1:model.TicketQuery):Promise<model.TicketPage>;
 
+export function SetCounterActive(arg1:number,arg2:boolean):Promise<void>;
+
 export function SetTicketActive(arg1:number,arg2:boolean):Promise<void>;
 
-export function SetupClient(arg1:string,arg2:string):Promise<void>;
+export function SetupClient(arg1:string):Promise<void>;
 
 export function SetupServer(arg1:number,arg2:string):Promise<void>;
 
 export function Status():Promise<model.Status>;
 
 export function TestServer(arg1:string):Promise<model.Status>;
+
+export function UseCounter(arg1:number,arg2:boolean):Promise<void>;

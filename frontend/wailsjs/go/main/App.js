@@ -70,6 +70,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function ListCounters() {
+  return window['go']['main']['App']['ListCounters']();
+}
+
 export function ListPrinters() {
   return window['go']['main']['App']['ListPrinters']();
 }
@@ -98,6 +102,10 @@ export function Logout() {
   return window['go']['main']['App']['Logout']();
 }
 
+export function MyCounter() {
+  return window['go']['main']['App']['MyCounter']();
+}
+
 export function PrintReceipt(arg1) {
   return window['go']['main']['App']['PrintReceipt'](arg1);
 }
@@ -108,6 +116,10 @@ export function PrintTest() {
 
 export function ReceiptPreview(arg1) {
   return window['go']['main']['App']['ReceiptPreview'](arg1);
+}
+
+export function ReleaseCounter(arg1) {
+  return window['go']['main']['App']['ReleaseCounter'](arg1);
 }
 
 export function RemoveLogo() {
@@ -134,8 +146,12 @@ export function RestoreTicket(arg1) {
   return window['go']['main']['App']['RestoreTicket'](arg1);
 }
 
-export function SaveLocalSettings(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['SaveLocalSettings'](arg1, arg2, arg3, arg4);
+export function SaveCounter(arg1) {
+  return window['go']['main']['App']['SaveCounter'](arg1);
+}
+
+export function SaveLocalSettings(arg1, arg2) {
+  return window['go']['main']['App']['SaveLocalSettings'](arg1, arg2);
 }
 
 export function SaveSettings(arg1) {
@@ -158,12 +174,16 @@ export function SearchTickets(arg1) {
   return window['go']['main']['App']['SearchTickets'](arg1);
 }
 
+export function SetCounterActive(arg1, arg2) {
+  return window['go']['main']['App']['SetCounterActive'](arg1, arg2);
+}
+
 export function SetTicketActive(arg1, arg2) {
   return window['go']['main']['App']['SetTicketActive'](arg1, arg2);
 }
 
-export function SetupClient(arg1, arg2) {
-  return window['go']['main']['App']['SetupClient'](arg1, arg2);
+export function SetupClient(arg1) {
+  return window['go']['main']['App']['SetupClient'](arg1);
 }
 
 export function SetupServer(arg1, arg2) {
@@ -176,4 +196,8 @@ export function Status() {
 
 export function TestServer(arg1) {
   return window['go']['main']['App']['TestServer'](arg1);
+}
+
+export function UseCounter(arg1, arg2) {
+  return window['go']['main']['App']['UseCounter'](arg1, arg2);
 }

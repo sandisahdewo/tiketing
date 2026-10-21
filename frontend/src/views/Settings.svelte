@@ -8,13 +8,11 @@
   import Field from '../components/Field.svelte'
   import Select from '../components/Select.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
-  import { formatDateTime, today } from '../lib/date'
+  import { formatDateTime } from '../lib/date'
 
   let { onreset }: { onreset: () => void } = $props()
 
   const info = session.info!
-  let terminal = $state(info.terminal)
-  let invoiceCode = $state(info.invoiceCode)
   let printerName = $state(info.printerName)
   let paperWidth = $state(info.paperWidth || 58)
   let printers = $state<string[]>([])
@@ -27,12 +25,64 @@
   let logo = $state('')
   let logoBusy = $state(false)
 
-  const localForm = new FormState(() => ({
-    terminal: required(terminal, 'Nama loket wajib diisi') ?? maxLength(terminal, 30, 'Nama loket maksimal 30 karakter'),
-    invoiceCode: /^[A-Za-z0-9]{0,4}$/.test(invoiceCode.trim()) ? undefined : 'Kode nota maksimal 4 karakter huruf/angka'
-  }))
+  const localForm = new FormState(() => ({}))
   // Printing problems belong to the printer field.
-  const localFields = { terminal: /terminal|loket/i, invoiceCode: /kode nota/i, paperWidth: /kertas/i, printerName: /printer|cetak/i }
+  const localFields = { paperWidth: /kertas/i, printerName: /printer|cetak/i }
+
+  // This PC's counter. Only an admin picks it, from the counters in the Loket menu.
+  let myCounter = $state<model.Counter | null>(null)
+  let counters = $state<model.Counter[]>([])
+  let chosenCounter = $state(0)
+  let counterError = $state('')
+  let assigning = $state(false)
+  let takeOver = $state<model.Counter | null>(null)
+
+  async function loadCounter() {
+    try {
+      const c = await App.MyCounter()
+      myCounter = c.id ? c : null
+      chosenCounter = c.id
+      session.info = await App.GetAppInfo()
+      if (isAdmin()) counters = await App.ListCounters()
+    } catch (e) {
+      counterError = errorMessage(e)
+    }
+  }
+
+  $effect(() => {
+    loadCounter()
+  })
+
+  let counterOptions = $derived(
+    counters
+      .filter((c) => c.active)
+      .map((c) => ({
+        value: c.id,
+        label: c.name + (c.deviceId && c.deviceId !== info.deviceId ? ` (dipakai ${c.deviceName || 'komputer lain'})` : '')
+      }))
+  )
+
+  async function useCounter(force = false) {
+    if (assigning || !chosenCounter) return
+    const c = counters.find((x) => x.id === chosenCounter)
+    if (!force && c?.deviceId && c.deviceId !== info.deviceId) {
+      takeOver = c
+      return
+    }
+    assigning = true
+    counterError = ''
+    try {
+      await App.UseCounter(chosenCounter, force)
+      takeOver = null
+      await loadCounter()
+      toast('Loket komputer ini: ' + (myCounter?.name ?? ''))
+    } catch (e) {
+      counterError = errorMessage(e)
+      takeOver = null
+    } finally {
+      assigning = false
+    }
+  }
 
   const businessForm = new FormState(() => ({
     businessName: maxLength(business.businessName, 100, 'Nama usaha maksimal 100 karakter'),
@@ -42,9 +92,6 @@
   }))
   let logoError = $state('')
 
-  let invoiceExample = $derived(
-    `${business.invoicePrefix.toUpperCase()}${invoiceCode.toUpperCase()}${today().replaceAll('-', '')}0001`
-  )
 
   async function loadLogo() {
     try {
@@ -192,7 +239,7 @@
     if (savingLocal || !localForm.check()) return
     savingLocal = true
     try {
-      await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
+      await App.SaveLocalSettings(printerName, Number(paperWidth))
       session.info = await App.GetAppInfo()
       toast('Pengaturan komputer disimpan')
     } catch (e) {
@@ -208,7 +255,7 @@
     if (savingLocal || !localForm.check()) return
     savingLocal = testPrinting = true
     try {
-      await App.SaveLocalSettings(printerName, Number(paperWidth), terminal, invoiceCode)
+      await App.SaveLocalSettings(printerName, Number(paperWidth))
       toast(await App.PrintTest())
     } catch (e) {
       localForm.fail(errorMessage(e), localFields)
@@ -272,14 +319,19 @@
       <h2 class="font-semibold">Komputer ini</h2>
       <p class="text-sm text-slate-500">Hanya berlaku untuk komputer ini.</p>
       <div class="mt-4 space-y-4">
-        <Field label="Nama loket" id="terminal" form={localForm} name="terminal">
-          <input id="terminal" class="input" bind:value={terminal} maxlength="30" />
-        </Field>
-        {#snippet invoiceHint()}
-          Disisipkan setelah prefix. Contoh no. nota: <span class="font-mono font-semibold">{invoiceExample}</span>
-        {/snippet}
-        <Field label="Kode nota" id="code" form={localForm} name="invoiceCode" hint={invoiceHint}>
-          <input id="code" class="input w-32 uppercase" bind:value={invoiceCode} maxlength="4" placeholder="25" />
+        <Field label="Loket" id="counter" error={counterError}>
+          {#if myCounter}
+            <p class="text-sm"><b>{myCounter.name}</b> <span class="text-slate-500">· kode nota {myCounter.invoiceCode}</span></p>
+          {:else}
+            <p class="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Komputer ini belum punya loket dan belum bisa dipakai transaksi.{isAdmin() ? '' : ' Minta admin memilih loket.'}</p>
+          {/if}
+          {#if isAdmin()}
+            <div class="mt-2 flex gap-2">
+              <div class="flex-1"><Select id="counter" bind:value={chosenCounter} options={[{ value: 0, label: 'Pilih loket…' }, ...counterOptions]} /></div>
+              <button class="btn btn-secondary" onclick={() => useCounter()} disabled={assigning || !chosenCounter || chosenCounter === myCounter?.id}>{assigning ? 'Menyimpan…' : 'Pakai'}</button>
+            </div>
+            <p class="field-hint">Buat atau ubah loket di menu Loket. Satu loket hanya untuk satu komputer.</p>
+          {/if}
         </Field>
         <Field label="Printer thermal" id="printer" form={localForm} name="printerName">
           <Select
@@ -459,6 +511,19 @@
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={cancelRestore} disabled={restoring}>Batal</button>
       <button class="btn btn-danger" onclick={restoreDatabase} disabled={restoring}>{restoring ? 'Memulihkan…' : 'Restore Database'}</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if takeOver}
+  <Modal title="Ambil Alih Loket" onclose={() => (takeOver = null)} width="max-w-md">
+    <p>
+      Loket <b>{takeOver.name}</b> sedang dipakai komputer <b>{takeOver.deviceName || 'lain'}</b>. Kalau diambil alih, komputer itu tidak punya loket lagi
+      dan tidak bisa bertransaksi sampai admin memilihkan loket lain.
+    </p>
+    {#snippet footer()}
+      <button class="btn btn-secondary" onclick={() => (takeOver = null)} disabled={assigning}>Batal</button>
+      <button class="btn btn-danger" onclick={() => useCounter(true)} disabled={assigning}>{assigning ? 'Menyimpan…' : 'Ambil Alih'}</button>
     {/snippet}
   </Modal>
 {/if}

@@ -14,7 +14,7 @@
   let testResult = $state('')
 
   const form = new FormState(() => ({
-    terminal: required(terminal, 'Nama loket wajib diisi') ?? maxLength(terminal, 30, 'Nama loket maksimal 30 karakter'),
+    terminal: mode === 'server' ? (required(terminal, 'Nama loket wajib diisi') ?? maxLength(terminal, 30, 'Nama loket maksimal 30 karakter')) : undefined,
     port: mode === 'server' && !(Number.isInteger(port) && port >= 1024 && port <= 65535) ? 'Port harus angka antara 1024 dan 65535' : undefined,
     serverUrl: mode === 'client' ? required(serverUrl, 'Alamat server wajib diisi') : undefined
   }))
@@ -49,7 +49,7 @@
       if (mode === 'server') {
         await App.SetupServer(Number(port), terminal)
       } else {
-        await App.SetupClient(serverUrl, terminal)
+        await App.SetupClient(serverUrl)
       }
       ondone()
     } catch (e) {
@@ -85,9 +85,11 @@
     </div>
 
     <div class="mt-6 space-y-4">
-      <Field label="Nama loket / komputer" id="terminal" {form} name="terminal" hint="Dicetak di nota, contoh: LOKET 1">
-        <input id="terminal" class="input" bind:value={terminal} maxlength="30" />
-      </Field>
+      {#if mode === 'server'}
+        <Field label="Nama loket komputer ini" id="terminal" {form} name="terminal" hint="Loket pertama, dicetak di nota, contoh: LOKET 1. Loket lain dibuat admin di menu Loket.">
+          <input id="terminal" class="input" bind:value={terminal} maxlength="30" />
+        </Field>
+      {/if}
 
       {#if mode === 'server'}
         {#snippet addresses()}
@@ -98,7 +100,7 @@
           <input id="port" class="input w-40" type="number" bind:value={port} />
         </Field>
       {:else}
-        <Field label="Alamat server" id="server" {form} name="serverUrl" hint="Lihat alamatnya di menu Pengaturan pada komputer Server.">
+        <Field label="Alamat server" id="server" {form} name="serverUrl" hint="Lihat alamatnya di menu Pengaturan pada komputer Server. Loket komputer ini dipilih admin setelah login, di menu Pengaturan.">
           <div class="flex gap-2">
             <input id="server" class="input" placeholder="192.168.1.10:8787" bind:value={serverUrl} />
             <button type="button" class="btn btn-secondary shrink-0" onclick={test} disabled={busy}>Tes koneksi</button>

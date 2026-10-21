@@ -6,11 +6,12 @@ export namespace main {
 	    ready: boolean;
 	    startError: string;
 	    terminal: string;
+	    deviceId: string;
+	    deviceName: string;
 	    serverUrl: string;
 	    port: number;
 	    addresses: string[];
 	    dataDir: string;
-	    invoiceCode: string;
 	    printerName: string;
 	    paperWidth: number;
 	    os: string;
@@ -26,11 +27,12 @@ export namespace main {
 	        this.ready = source["ready"];
 	        this.startError = source["startError"];
 	        this.terminal = source["terminal"];
+	        this.deviceId = source["deviceId"];
+	        this.deviceName = source["deviceName"];
 	        this.serverUrl = source["serverUrl"];
 	        this.port = source["port"];
 	        this.addresses = source["addresses"];
 	        this.dataDir = source["dataDir"];
-	        this.invoiceCode = source["invoiceCode"];
 	        this.printerName = source["printerName"];
 	        this.paperWidth = source["paperWidth"];
 	        this.os = source["os"];
@@ -101,6 +103,50 @@ export namespace main {
 
 export namespace model {
 	
+	export class Counter {
+	    id: number;
+	    name: string;
+	    invoiceCode: string;
+	    active: boolean;
+	    deviceId: string;
+	    deviceName: string;
+	    lastSeenAt?: string;
+	    createdAt: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Counter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.invoiceCode = source["invoiceCode"];
+	        this.active = source["active"];
+	        this.deviceId = source["deviceId"];
+	        this.deviceName = source["deviceName"];
+	        this.lastSeenAt = source["lastSeenAt"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class CounterInput {
+	    id: number;
+	    name: string;
+	    invoiceCode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CounterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.invoiceCode = source["invoiceCode"];
+	    }
+	}
 	export class ReportTicketRow {
 	    ticketId: number;
 	    ticketName: string;
@@ -217,7 +263,7 @@ export namespace model {
 	}
 	export class ReportFilters {
 	    cashiers: ReportCashier[];
-	    terminals: string[];
+	    counters: Counter[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportFilters(source);
@@ -226,7 +272,7 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cashiers = this.convertValues(source["cashiers"], ReportCashier);
-	        this.terminals = source["terminals"];
+	        this.counters = this.convertValues(source["counters"], Counter);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -253,7 +299,7 @@ export namespace model {
 	    to: string;
 	    category: string;
 	    userId: number;
-	    terminal: string;
+	    counterId: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportQuery(source);
@@ -266,7 +312,7 @@ export namespace model {
 	        this.to = source["to"];
 	        this.category = source["category"];
 	        this.userId = source["userId"];
-	        this.terminal = source["terminal"];
+	        this.counterId = source["counterId"];
 	    }
 	}
 	
@@ -301,6 +347,8 @@ export namespace model {
 	    userId: number;
 	    cashierName: string;
 	    terminal: string;
+	    counterId: number;
+	    counterName: string;
 	    total: number;
 	    paid: number;
 	    changeAmount: number;
@@ -322,6 +370,8 @@ export namespace model {
 	        this.userId = source["userId"];
 	        this.cashierName = source["cashierName"];
 	        this.terminal = source["terminal"];
+	        this.counterId = source["counterId"];
+	        this.counterName = source["counterName"];
 	        this.total = source["total"];
 	        this.paid = source["paid"];
 	        this.changeAmount = source["changeAmount"];
@@ -411,7 +461,7 @@ export namespace model {
 	    search: string;
 	    category: string;
 	    userId: number;
-	    terminal: string;
+	    counterId: number;
 	    page: number;
 	    pageSize: number;
 	    sort: string;
@@ -429,7 +479,7 @@ export namespace model {
 	        this.search = source["search"];
 	        this.category = source["category"];
 	        this.userId = source["userId"];
-	        this.terminal = source["terminal"];
+	        this.counterId = source["counterId"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	        this.sort = source["sort"];
@@ -443,7 +493,7 @@ export namespace model {
 	    search: string;
 	    category: string;
 	    userId: number;
-	    terminal: string;
+	    counterId: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleQuery(source);
@@ -457,7 +507,7 @@ export namespace model {
 	        this.search = source["search"];
 	        this.category = source["category"];
 	        this.userId = source["userId"];
-	        this.terminal = source["terminal"];
+	        this.counterId = source["counterId"];
 	    }
 	}
 	export class Settings {

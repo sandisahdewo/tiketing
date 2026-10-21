@@ -1,6 +1,7 @@
 <script lang="ts">
   import Pos from './Pos.svelte'
   import Tickets from './Tickets.svelte'
+  import Counters from './Counters.svelte'
   import Users from './Users.svelte'
   import Reports from './Reports.svelte'
   import Settings from './Settings.svelte'
@@ -12,11 +13,12 @@
 
   let { onlogout, onreset }: { onlogout: () => void; onreset: () => void } = $props()
 
-  type View = 'pos' | 'tickets' | 'users' | 'reports' | 'settings'
+  type View = 'pos' | 'tickets' | 'counters' | 'users' | 'reports' | 'settings'
 
   const nav: { view: View; label: string; admin: boolean }[] = [
     { view: 'pos', label: 'Kasir', admin: false },
     { view: 'tickets', label: 'Tiket', admin: true },
+    { view: 'counters', label: 'Loket', admin: true },
     { view: 'users', label: 'Pengguna', admin: true },
     { view: 'reports', label: 'Laporan', admin: false },
     { view: 'settings', label: 'Pengaturan', admin: false }
@@ -38,6 +40,14 @@
   $effect(() => {
     const timer = setInterval(() => (now = new Date()), 1000)
     return () => clearInterval(timer)
+  })
+
+  // The server knows this PC's counter; it may have changed since last time.
+  $effect(() => {
+    App.MyCounter()
+      .then(() => App.GetAppInfo())
+      .then((info) => (session.info = info))
+      .catch(() => {})
   })
 
   $effect(() => {
@@ -72,7 +82,11 @@
     </nav>
     <div class="ml-auto flex items-center gap-5 text-sm">
       <span class="tabular-nums">{clockText(now)}</span>
-      <span class="rounded bg-brand-800/50 px-2 py-1">{session.info?.terminal}</span>
+      {#if session.info?.terminal}
+        <span class="rounded bg-brand-800/50 px-2 py-1">{session.info.terminal}</span>
+      {:else}
+        <span class="rounded bg-amber-400 px-2 py-1 font-semibold text-amber-950">Belum ada loket</span>
+      {/if}
       <span>
         <b>{session.user?.fullName}</b>
         <span class="opacity-75">({session.user?.role === 'admin' ? 'Admin' : 'Kasir'})</span>
@@ -88,6 +102,8 @@
       <Pos onhistory={() => show('reports', true)} onshowsale={(id) => show('reports', true, id)} />
     {:else if view === 'tickets'}
       <Tickets />
+    {:else if view === 'counters'}
+      <Counters />
     {:else if view === 'users'}
       <Users />
     {:else if view === 'reports'}

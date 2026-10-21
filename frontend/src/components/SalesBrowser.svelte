@@ -17,7 +17,7 @@
     waiting = false,
     emptyText = 'Tidak ada transaksi.',
     highlight = null,
-    filter = { category: '', userId: 0, terminal: '' },
+    filter = { category: '', userId: 0, counterId: 0 },
     ondeleted
   }: {
     from: string
@@ -31,7 +31,7 @@
     // a sale to show at the top of the first page and blink (just made)
     highlight?: number | null
     // optional report filters (category, cashier, counter)
-    filter?: { category: string; userId: number; terminal: string }
+    filter?: { category: string; userId: number; counterId: number }
     ondeleted?: () => void
   } = $props()
 

@@ -53,20 +53,20 @@
   // Optional filters (admin). They apply right away, like the period buttons.
   let category = $state('')
   let cashierId = $state(0)
-  let terminal = $state('')
+  let counterId = $state(0)
   let filterChoices = $state<model.ReportFilters | null>(null)
-  let filtered = $derived(category !== '' || cashierId !== 0 || terminal !== '')
+  let filtered = $derived(category !== '' || cashierId !== 0 || counterId !== 0)
   // The filters of the report on screen; the transaction list follows them.
-  let appliedFilter = $state({ category: '', userId: 0, terminal: '' })
+  let appliedFilter = $state({ category: '', userId: 0, counterId: 0 })
 
   function filterQuery() {
-    return { category, userId: cashierId, terminal }
+    return { category, userId: cashierId, counterId }
   }
 
   function resetFilter() {
     category = ''
     cashierId = 0
-    terminal = ''
+    counterId = 0
   }
 
   // Bumped on every "Tampilkan" so the transaction list reloads too.
@@ -169,7 +169,7 @@
     period
     category
     cashierId
-    terminal
+    counterId
     load()
   })
 
@@ -222,7 +222,11 @@
       />
     </Field>
     <Field label="Loket" id="f-terminal" class="w-28">
-      <Select id="f-terminal" bind:value={terminal} options={[{ value: '', label: 'Semua' }, ...(filterChoices?.terminals ?? []).map((t) => ({ value: t, label: t }))]} />
+      <Select
+        id="f-terminal"
+        bind:value={counterId}
+        options={[{ value: 0, label: 'Semua' }, ...(filterChoices?.counters ?? []).map((c) => ({ value: c.id, label: c.name + (c.active ? '' : ' (non-aktif)') }))]}
+      />
     </Field>
     {#if filtered}
       <button class="btn btn-ghost px-2 py-2 text-sm text-brand-700" onclick={resetFilter}>Reset filter</button>
