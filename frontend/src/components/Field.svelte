@@ -11,6 +11,7 @@
     name,
     error,
     hint,
+    floatError = false,
     class: className = '',
     children
   }: {
@@ -21,6 +22,9 @@
     name?: string
     error?: string
     hint?: string | Snippet
+    // show the error over the space below instead of pushing the layout down
+    // (for fields in a row, like a filter bar)
+    floatError?: boolean
     class?: string
     children: Snippet
   } = $props()
@@ -32,13 +36,13 @@
   }
 </script>
 
-<div class="{message ? 'field-invalid' : ''} {className}" oninput={edited} onchange={edited}>
+<div class="{message ? 'field-invalid' : ''} {floatError ? 'relative' : ''} {className}" oninput={edited} onchange={edited}>
   {#if label}
     {#if id}<label class="label" for={id}>{label}</label>{:else}<span class="label">{label}</span>{/if}
   {/if}
   {@render children()}
   {#if message}
-    <p class="field-error">{message}</p>
+    <p class="field-error {floatError ? 'absolute top-full left-0 whitespace-nowrap' : ''}">{message}</p>
   {:else if typeof hint === 'string'}
     <p class="field-hint">{hint}</p>
   {:else if hint}

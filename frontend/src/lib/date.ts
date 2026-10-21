@@ -1,5 +1,5 @@
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-const monthsLong = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+export const monthsLong = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
 const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']
 
 export function toISODate(d: Date): string {
@@ -11,7 +11,7 @@ export function today(): string {
   return toISODate(new Date())
 }
 
-function parseDate(s: string): Date {
+export function parseDate(s: string): Date {
   const [y, m, d] = s.slice(0, 10).split('-').map(Number)
   return new Date(y, m - 1, d)
 }

@@ -4,6 +4,7 @@
   import Pager from '../components/Pager.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import Field from '../components/Field.svelte'
+  import DateInput from '../components/DateInput.svelte'
   import SortHeader from '../components/SortHeader.svelte'
   import { sortRows, type Sort } from '../lib/sort'
   import { FormState, required } from '../lib/form.svelte'
@@ -188,7 +189,7 @@
   </div>
 
   {#if admin}
-  <div class="card mt-4 flex flex-wrap items-end gap-4 p-4">
+  <div class="card mt-4 flex flex-wrap items-end gap-4 px-4 pt-4 pb-7">
     <div>
       <span class="label">Periode</span>
       <div class="flex rounded-md border border-slate-300 bg-white p-0.5 text-sm">
@@ -197,11 +198,11 @@
         {/each}
       </div>
     </div>
-    <Field label="Dari" id="from" form={dateForm} name="from">
-      <input id="from" class="input" type="date" bind:value={from} />
+    <Field label="Dari" id="from" form={dateForm} name="from" floatError class="w-48">
+      <DateInput id="from" bind:value={from} />
     </Field>
-    <Field label="Sampai" id="to" form={dateForm} name="to">
-      <input id="to" class="input" type="date" bind:value={to} />
+    <Field label="Sampai" id="to" form={dateForm} name="to" floatError class="w-48">
+      <DateInput id="to" bind:value={to} />
     </Field>
     <button class="btn btn-primary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Tampilkan'}</button>
     <div class="ml-auto flex gap-1 text-sm">
