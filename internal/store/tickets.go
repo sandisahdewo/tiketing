@@ -6,22 +6,27 @@ import (
 	"tiket/internal/model"
 )
 
-const ticketColumns = "id, name, price, category, color, created_at, updated_at, deleted_at"
+const ticketColumns = "id, name, price, category, color, active, created_at, updated_at, deleted_at"
 
 func scanTicket(row interface{ Scan(...any) error }) (model.Ticket, error) {
 	var t model.Ticket
 	var deleted sql.NullString
-	err := row.Scan(&t.ID, &t.Name, &t.Price, &t.Category, &t.Color, &t.CreatedAt, &t.UpdatedAt, &deleted)
+	err := row.Scan(&t.ID, &t.Name, &t.Price, &t.Category, &t.Color, &t.Active, &t.CreatedAt, &t.UpdatedAt, &deleted)
 	if deleted.Valid {
 		t.DeletedAt = &deleted.String
 	}
 	return t, err
 }
 
-func (s *Store) ListTickets(search string, deleted bool) ([]model.Ticket, error) {
+// ListTickets lists deleted or non-deleted tickets; activeOnly hides the
+// inactive ones (for the cashier screen).
+func (s *Store) ListTickets(search string, deleted, activeOnly bool) ([]model.Ticket, error) {
 	cond := "deleted_at IS NULL"
 	if deleted {
 		cond = "deleted_at IS NOT NULL"
+	}
+	if activeOnly {
+		cond += " AND active = 1"
 	}
 	rows, err := s.DB.Query(
 		"SELECT "+ticketColumns+" FROM tickets WHERE "+cond+` AND name LIKE ? ESCAPE '\' ORDER BY category, name`,
@@ -76,6 +81,14 @@ func (s *Store) DeleteTicket(id int64) error {
 	res, err := s.DB.Exec(
 		"UPDATE tickets SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
 		now, now, id,
+	)
+	return affected(res, err)
+}
+
+func (s *Store) SetTicketActive(id int64, active bool) error {
+	res, err := s.DB.Exec(
+		"UPDATE tickets SET active = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+		active, s.now(), id,
 	)
 	return affected(res, err)
 }

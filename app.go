@@ -393,12 +393,13 @@ func (a *App) CurrentUser() *model.User {
 	return a.user
 }
 
-func (a *App) ListTickets(search string, deleted bool) ([]model.Ticket, error) {
+// ListTickets lists tickets; activeOnly hides inactive ones (cashier screen).
+func (a *App) ListTickets(search string, deleted, activeOnly bool) ([]model.Ticket, error) {
 	svc, token, err := a.service()
 	if err != nil {
 		return nil, err
 	}
-	out, err := svc.ListTickets(token, search, deleted)
+	out, err := svc.ListTickets(token, search, deleted, activeOnly)
 	return out, a.check(err)
 }
 
@@ -417,6 +418,14 @@ func (a *App) DeleteTicket(id int64) error {
 		return err
 	}
 	return a.check(svc.DeleteTicket(token, id))
+}
+
+func (a *App) SetTicketActive(id int64, active bool) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	return a.check(svc.SetTicketActive(token, id, active))
 }
 
 func (a *App) RestoreTicket(id int64) error {

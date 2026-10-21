@@ -350,6 +350,7 @@ export namespace model {
 	    price: number;
 	    category: string;
 	    color: string;
+	    active: boolean;
 	    createdAt: string;
 	    updatedAt: string;
 	    deletedAt?: string;
@@ -365,6 +366,7 @@ export namespace model {
 	        this.price = source["price"];
 	        this.category = source["category"];
 	        this.color = source["color"];
+	        this.active = source["active"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	        this.deletedAt = source["deletedAt"];

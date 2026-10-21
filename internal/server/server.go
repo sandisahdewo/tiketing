@@ -35,8 +35,14 @@ type LoginRequest struct {
 }
 
 type ListTicketsRequest struct {
-	Search  string `json:"search"`
-	Deleted bool   `json:"deleted"`
+	Search     string `json:"search"`
+	Deleted    bool   `json:"deleted"`
+	ActiveOnly bool   `json:"activeOnly"`
+}
+
+type SetActiveRequest struct {
+	ID     int64 `json:"id"`
+	Active bool  `json:"active"`
 }
 
 type Empty struct{}
@@ -48,7 +54,7 @@ const HeaderOpID = "X-Op-ID"
 
 var (
 	readRoutes  = map[string]bool{"me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
-	summaryKeys = []string{"id", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted"}
+	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted"}
 )
 
 func requestUser(svc service.Service, token string, out any) string {
@@ -176,7 +182,10 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 		return svc.Me(t)
 	}))
 	route("listTickets", call(func(t string, in ListTicketsRequest) (any, error) {
-		return svc.ListTickets(t, in.Search, in.Deleted)
+		return svc.ListTickets(t, in.Search, in.Deleted, in.ActiveOnly)
+	}))
+	route("setTicketActive", call(func(t string, in SetActiveRequest) (any, error) {
+		return Empty{}, svc.SetTicketActive(t, in.ID, in.Active)
 	}))
 	route("saveTicket", call(func(t string, in model.TicketInput) (any, error) {
 		return svc.SaveTicket(t, in)

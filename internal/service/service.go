@@ -11,10 +11,11 @@ type Service interface {
 	Logout(token string) error
 	Me(token string) (model.User, error)
 
-	ListTickets(token, search string, deleted bool) ([]model.Ticket, error)
+	ListTickets(token, search string, deleted, activeOnly bool) ([]model.Ticket, error)
 	SaveTicket(token string, in model.TicketInput) (model.Ticket, error)
 	DeleteTicket(token string, id int64) error
 	RestoreTicket(token string, id int64) error
+	SetTicketActive(token string, id int64, active bool) error
 
 	ListUsers(token string) ([]model.User, error)
 	SaveUser(token string, in model.UserInput) (model.User, error)

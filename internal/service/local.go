@@ -115,15 +115,26 @@ func (l *Local) Me(token string) (model.User, error) {
 	return l.user(token)
 }
 
-func (l *Local) ListTickets(token, search string, deleted bool) ([]model.Ticket, error) {
-	if deleted {
-		if _, err := l.user(token, model.RoleAdmin); err != nil {
-			return nil, err
-		}
-	} else if _, err := l.user(token); err != nil {
+func (l *Local) ListTickets(token, search string, deleted, activeOnly bool) ([]model.Ticket, error) {
+	u, err := l.user(token)
+	if err != nil {
 		return nil, err
 	}
-	return l.Store.ListTickets(search, deleted)
+	// Cashiers only ever see what they can sell.
+	if u.Role != model.RoleAdmin {
+		if deleted {
+			return nil, model.ErrForbidden
+		}
+		activeOnly = true
+	}
+	return l.Store.ListTickets(search, deleted, activeOnly)
+}
+
+func (l *Local) SetTicketActive(token string, id int64, active bool) error {
+	if _, err := l.user(token, model.RoleAdmin); err != nil {
+		return err
+	}
+	return l.Store.SetTicketActive(id, active)
 }
 
 func (l *Local) SaveTicket(token string, in model.TicketInput) (model.Ticket, error) {

@@ -139,9 +139,9 @@ func (r *Remote) Me(token string) (model.User, error) {
 	return u, r.call("me", token, nil, &u)
 }
 
-func (r *Remote) ListTickets(token, search string, deleted bool) ([]model.Ticket, error) {
+func (r *Remote) ListTickets(token, search string, deleted, activeOnly bool) ([]model.Ticket, error) {
 	var out []model.Ticket
-	in := map[string]any{"search": search, "deleted": deleted}
+	in := map[string]any{"search": search, "deleted": deleted, "activeOnly": activeOnly}
 	return out, r.call("listTickets", token, in, &out)
 }
 
@@ -156,6 +156,10 @@ func (r *Remote) DeleteTicket(token string, id int64) error {
 
 func (r *Remote) RestoreTicket(token string, id int64) error {
 	return r.call("restoreTicket", token, idRequest{id}, nil)
+}
+
+func (r *Remote) SetTicketActive(token string, id int64, active bool) error {
+	return r.call("setTicketActive", token, map[string]any{"id": id, "active": active}, nil)
 }
 
 func (r *Remote) ListUsers(token string) ([]model.User, error) {

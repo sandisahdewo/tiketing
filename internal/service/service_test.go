@@ -107,7 +107,7 @@ func exercise(t *testing.T, svc Service, c *clock) {
 		t.Fatal("empty ticket name accepted")
 	}
 
-	if got := must(svc.ListTickets(kasir, "week", false)); len(got) != 1 || got[0].ID != weekday.ID {
+	if got := must(svc.ListTickets(kasir, "week", false, false)); len(got) != 1 || got[0].ID != weekday.ID {
 		t.Fatalf("search failed: %+v", got)
 	}
 
@@ -115,10 +115,10 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	if err := svc.DeleteTicket(admin, elder.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := must(svc.ListTickets(kasir, "", false)); len(got) != 2 {
+	if got := must(svc.ListTickets(kasir, "", false, false)); len(got) != 2 {
 		t.Fatalf("deleted ticket still listed: %+v", got)
 	}
-	if got := must(svc.ListTickets(admin, "", true)); len(got) != 1 || got[0].DeletedAt == nil {
+	if got := must(svc.ListTickets(admin, "", true, false)); len(got) != 1 || got[0].DeletedAt == nil {
 		t.Fatalf("deleted list wrong: %+v", got)
 	}
 	if _, err := svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 1}}, Paid: 9999999}); err == nil {
@@ -505,4 +505,60 @@ func TestLoggedOpSessionAndPayload(t *testing.T) {
 	if n := strings.Count(buf.String(), "op=klik123"); n != 4 {
 		t.Errorf("want 4 lines (2 steps x client+server) under one op, got %d:\n%s", n, buf.String())
 	}
+}
+
+func TestTicketActive(t *testing.T) {
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
+	if !entry.Active {
+		t.Fatal("new ticket should be active")
+	}
+
+	if err := svc.SetTicketActive(kasir, topup.ID, false); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not change active, got %v", err)
+	}
+	if err := svc.SetTicketActive(admin, 999, false); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unknown ticket: %v", err)
+	}
+	if err := svc.SetTicketActive(admin, topup.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The cashier screen never sees inactive tickets, even when it asks for them.
+	for _, tc := range []struct {
+		token      string
+		activeOnly bool
+		want       int
+	}{{kasir, false, 1}, {kasir, true, 1}, {admin, true, 1}, {admin, false, 2}} {
+		if got := must(svc.ListTickets(tc.token, "", false, tc.activeOnly)); len(got) != tc.want {
+			t.Errorf("activeOnly=%v admin=%v: got %d tickets, want %d", tc.activeOnly, tc.token == admin, len(got), tc.want)
+		}
+	}
+	if got := must(svc.ListTickets(admin, "Topup", false, false)); len(got) != 1 || got[0].Active {
+		t.Errorf("admin should see the inactive ticket flagged: %+v", got)
+	}
+	if _, err := svc.ListTickets(kasir, "", true, false); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir must not list deleted tickets, got %v", err)
+	}
+
+	_, err := svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}, {TicketID: topup.ID, Qty: 1}}, Paid: 6000000})
+	var ve *model.ValidationError
+	if !errors.As(err, &ve) || !strings.Contains(ve.Message, "Topup") {
+		t.Errorf("selling an inactive ticket should fail with its name, got %v", err)
+	}
+
+	must(svc.SaveTicket(admin, model.TicketInput{ID: topup.ID, Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
+	if got := must(svc.ListTickets(admin, "Topup", false, false)); got[0].Active {
+		t.Error("editing a ticket must not reactivate it")
+	}
+	if err := svc.SetTicketActive(admin, topup.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	must(svc.CreateSale(kasir, model.SaleInput{Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
 }

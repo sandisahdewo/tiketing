@@ -9,21 +9,37 @@
 
   let tickets = $state<model.Ticket[]>([])
   let search = $state('')
-  let showDeleted = $state(false)
+  type Status = 'all' | 'active' | 'inactive' | 'deleted'
+  const statuses: { value: Status; label: string }[] = [
+    { value: 'all', label: 'Semua' },
+    { value: 'active', label: 'Aktif' },
+    { value: 'inactive', label: 'Non-aktif' },
+    { value: 'deleted', label: 'Terhapus' }
+  ]
+
+  let status = $state<Status>('all')
+  let showDeleted = $derived(status === 'deleted')
   let category = $state('')
   let loading = $state(true)
 
-  let visible = $derived(category ? tickets.filter((t) => t.category === category) : tickets)
+  let visible = $derived(
+    tickets.filter(
+      (t) =>
+        (!category || t.category === category) &&
+        (status === 'active' ? t.active : status === 'inactive' ? !t.active : true)
+    )
+  )
 
   let editing = $state<{ id: number; name: string; price: number | null; category: string; color: string } | null>(null)
   let formError = $state('')
   let saving = $state(false)
   let confirmDelete = $state<model.Ticket | null>(null)
+  let confirmActive = $state<model.Ticket | null>(null)
 
   async function load() {
     loading = true
     try {
-      tickets = await App.ListTickets(search, showDeleted)
+      tickets = await App.ListTickets(search, showDeleted, false)
     } catch (e) {
       handleError(e)
     } finally {
@@ -78,6 +94,19 @@
     }
   }
 
+  async function toggleActive() {
+    if (!confirmActive) return
+    const t = confirmActive
+    try {
+      await App.SetTicketActive(t.id, !t.active)
+      toast(`${t.name} ${t.active ? 'dinon-aktifkan' : 'diaktifkan'}`)
+      confirmActive = null
+      load()
+    } catch (e) {
+      handleError(e)
+    }
+  }
+
   async function restore(t: model.Ticket) {
     try {
       await App.RestoreTicket(t.id)
@@ -98,8 +127,9 @@
   <div class="mt-4 flex items-center gap-4">
     <input class="input max-w-sm" placeholder="Cari nama tiket…" bind:value={search} />
     <div class="flex rounded-md border border-slate-300 bg-white p-0.5 text-sm">
-      <button class="rounded px-3 py-1.5 {!showDeleted ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (showDeleted = false)}>Aktif</button>
-      <button class="rounded px-3 py-1.5 {showDeleted ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (showDeleted = true)}>Terhapus</button>
+      {#each statuses as st}
+        <button class="rounded px-3 py-1.5 {status === st.value ? 'bg-brand-600 text-white' : 'text-slate-600'}" onclick={() => (status = st.value)}>{st.label}</button>
+      {/each}
     </div>
     <div class="flex rounded-md border border-slate-300 bg-white p-0.5 text-sm">
       {#each [{ value: '', label: 'Semua' }, ...categories] as c}
@@ -115,25 +145,35 @@
           <th>Nama</th>
           <th>Kategori</th>
           <th class="text-right">Harga</th>
+          {#if !showDeleted}<th>Status</th>{/if}
           <th>Dibuat</th>
           <th>Diubah</th>
           {#if showDeleted}<th>Dihapus</th>{/if}
-          <th class="w-48"></th>
+          <th class="w-72"></th>
         </tr>
       </thead>
       <tbody>
         {#if loading && tickets.length === 0}
           <tr><td colspan="7" class="py-10 text-center text-slate-500">Memuat…</td></tr>
         {:else if visible.length === 0}
-          <tr><td colspan="7" class="py-10 text-center text-slate-500">{showDeleted ? 'Tidak ada tiket terhapus.' : 'Belum ada tiket.'}</td></tr>
+          <tr><td colspan="7" class="py-10 text-center text-slate-500">{showDeleted ? 'Tidak ada tiket terhapus.' : status === 'inactive' ? 'Tidak ada tiket non-aktif.' : 'Belum ada tiket.'}</td></tr>
         {/if}
         {#each visible as t (t.id)}
-          <tr class="hover:bg-slate-50">
+          <tr class="hover:bg-slate-50 {!showDeleted && !t.active ? 'text-slate-400' : ''}">
             <td class="font-medium">
-              <span class="inline-flex items-center gap-2"><span class="h-3.5 w-3.5 shrink-0 rounded-sm {colorClass(t.color)}"></span>{t.name}</span>
+              <span class="inline-flex items-center gap-2"><span class="h-3.5 w-3.5 shrink-0 rounded-sm {colorClass(t.color)} {!showDeleted && !t.active ? 'opacity-40' : ''}"></span>{t.name}</span>
             </td>
             <td>{categoryLabel(t.category)}</td>
             <td class="text-right">{formatRp(t.price)}</td>
+            {#if !showDeleted}
+              <td>
+                {#if t.active}
+                  <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Aktif</span>
+                {:else}
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Non-aktif</span>
+                {/if}
+              </td>
+            {/if}
             <td class="text-slate-500">{formatDateTime(t.createdAt)}</td>
             <td class="text-slate-500">{formatDateTime(t.updatedAt)}</td>
             {#if showDeleted}<td class="text-slate-500">{formatDateTime(t.deletedAt)}</td>{/if}
@@ -141,6 +181,7 @@
               {#if showDeleted}
                 <button class="btn btn-secondary px-3 py-1" onclick={() => restore(t)}>Pulihkan</button>
               {:else}
+                <button class="btn btn-ghost px-3 py-1" onclick={() => (confirmActive = t)}>{t.active ? 'Non-aktifkan' : 'Aktifkan'}</button>
                 <button class="btn btn-secondary px-3 py-1" onclick={() => openForm(t)}>Ubah</button>
                 <button class="btn px-3 py-1 text-red-600 hover:bg-red-50" onclick={() => (confirmDelete = t)}>Hapus</button>
               {/if}
@@ -201,10 +242,24 @@
 
 {#if confirmDelete}
   <Modal title="Hapus Tiket" onclose={() => (confirmDelete = null)} width="max-w-md">
-    <p>Hapus tiket <b>{confirmDelete.name}</b>? Tiket tidak akan muncul di kasir, tapi riwayat penjualan tetap tersimpan. Tiket bisa dipulihkan dari tab Terhapus.</p>
+    <p>Hapus tiket <b>{confirmDelete.name}</b>? Tiket tidak akan muncul di kasir, tapi riwayat penjualan tetap tersimpan. Tiket bisa dipulihkan dari tab Terhapus. Kalau hanya ingin berhenti dijual sementara, pakai <b>Non-aktifkan</b>.</p>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (confirmDelete = null)}>Batal</button>
       <button class="btn btn-danger" onclick={remove}>Hapus</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if confirmActive}
+  <Modal title={confirmActive.active ? 'Non-aktifkan Tiket' : 'Aktifkan Tiket'} onclose={() => (confirmActive = null)} width="max-w-md">
+    {#if confirmActive.active}
+      <p>Non-aktifkan <b>{confirmActive.name}</b>? Tiket tidak muncul di kasir dan tidak bisa dijual sampai diaktifkan lagi. Riwayat penjualan tetap tersimpan.</p>
+    {:else}
+      <p>Aktifkan <b>{confirmActive.name}</b>? Tiket akan muncul lagi di kasir dan bisa dijual.</p>
+    {/if}
+    {#snippet footer()}
+      <button class="btn btn-secondary" onclick={() => (confirmActive = null)}>Batal</button>
+      <button class="btn {confirmActive?.active ? 'btn-danger' : 'btn-primary'}" onclick={toggleActive}>{confirmActive?.active ? 'Non-aktifkan' : 'Aktifkan'}</button>
     {/snippet}
   </Modal>
 {/if}

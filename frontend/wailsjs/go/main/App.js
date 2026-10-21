@@ -62,8 +62,8 @@ export function ListSales(arg1) {
   return window['go']['main']['App']['ListSales'](arg1);
 }
 
-export function ListTickets(arg1, arg2) {
-  return window['go']['main']['App']['ListTickets'](arg1, arg2);
+export function ListTickets(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListTickets'](arg1, arg2, arg3);
 }
 
 export function ListUsers() {
@@ -124,6 +124,10 @@ export function SaveTicket(arg1) {
 
 export function SaveUser(arg1) {
   return window['go']['main']['App']['SaveUser'](arg1);
+}
+
+export function SetTicketActive(arg1, arg2) {
+  return window['go']['main']['App']['SetTicketActive'](arg1, arg2);
 }
 
 export function SetupClient(arg1, arg2) {

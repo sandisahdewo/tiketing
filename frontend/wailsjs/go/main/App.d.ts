@@ -34,7 +34,7 @@ export function ListPrinters():Promise<Array<string>>;
 
 export function ListSales(arg1:model.SaleQuery):Promise<Array<model.Sale>>;
 
-export function ListTickets(arg1:string,arg2:boolean):Promise<Array<model.Ticket>>;
+export function ListTickets(arg1:string,arg2:boolean,arg3:boolean):Promise<Array<model.Ticket>>;
 
 export function ListUsers():Promise<Array<model.User>>;
 
@@ -65,6 +65,8 @@ export function SaveSettings(arg1:model.Settings):Promise<void>;
 export function SaveTicket(arg1:model.TicketInput):Promise<model.Ticket>;
 
 export function SaveUser(arg1:model.UserInput):Promise<model.User>;
+
+export function SetTicketActive(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetupClient(arg1:string,arg2:string):Promise<void>;
 

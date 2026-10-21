@@ -37,9 +37,14 @@ func (s *Store) CreateSale(userID int64, terminal, invoiceCode string, items []m
 	var total int64
 	for _, it := range items {
 		var price int64
-		err := tx.QueryRow("SELECT price FROM tickets WHERE id = ? AND deleted_at IS NULL", it.TicketID).Scan(&price)
+		var name string
+		var active bool
+		err := tx.QueryRow("SELECT price, name, active FROM tickets WHERE id = ? AND deleted_at IS NULL", it.TicketID).Scan(&price, &name, &active)
 		if err == sql.ErrNoRows {
 			return model.Sale{}, model.Invalid("Tiket tidak ditemukan atau sudah dihapus")
+		}
+		if err == nil && !active {
+			return model.Sale{}, model.Invalid("Tiket " + name + " sedang non-aktif dan tidak bisa dijual")
 		}
 		if err != nil {
 			return model.Sale{}, err

@@ -34,7 +34,7 @@
   async function load() {
     loading = true
     try {
-      tickets = await App.ListTickets('', false)
+      tickets = await App.ListTickets('', false, true)
       cart = cart.filter((c) => tickets.some((t) => t.id === c.ticket.id))
     } catch (e) {
       handleError(e)

@@ -133,10 +133,10 @@ func (l *Logged) Me(token string) (model.User, error) {
 	return out, err
 }
 
-func (l *Logged) ListTickets(token, search string, deleted bool) ([]model.Ticket, error) {
+func (l *Logged) ListTickets(token, search string, deleted, activeOnly bool) ([]model.Ticket, error) {
 	c := l.begin(token)
-	out, err := c.svc.ListTickets(token, search, deleted)
-	c.logError("ListTickets", err, map[string]any{"search": search, "deleted": deleted})
+	out, err := c.svc.ListTickets(token, search, deleted, activeOnly)
+	c.logError("ListTickets", err, map[string]any{"search": search, "deleted": deleted, "activeOnly": activeOnly})
 	return out, err
 }
 
@@ -158,6 +158,13 @@ func (l *Logged) RestoreTicket(token string, id int64) error {
 	c := l.begin(token)
 	err := c.svc.RestoreTicket(token, id)
 	c.log("RestoreTicket", err, nil, "id", id)
+	return err
+}
+
+func (l *Logged) SetTicketActive(token string, id int64, active bool) error {
+	c := l.begin(token)
+	err := c.svc.SetTicketActive(token, id, active)
+	c.log("SetTicketActive", err, nil, "id", id, "active", active)
 	return err
 }
 

@@ -40,6 +40,7 @@ type Ticket struct {
 	Price     int64   `json:"price"`
 	Category  string  `json:"category"`
 	Color     string  `json:"color"`
+	Active    bool    `json:"active"`
 	CreatedAt string  `json:"createdAt"`
 	UpdatedAt string  `json:"updatedAt"`
 	DeletedAt *string `json:"deletedAt"`
