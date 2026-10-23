@@ -68,9 +68,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.meta.outputs.tag }}" \
+          ls -la build/bin
+          if ! out=$(gh release create "${{ steps.meta.outputs.tag }}" \
             build/bin/tiket.exe \
             build/bin/*-installer.exe \
             build/bin/latest.json \
             --title "${{ steps.meta.outputs.tag }}" \
-            --notes-file release-notes.txt
+            --notes-file release-notes.txt 2>&1); then
+            echo "$out"
+            echo "::error title=Rilis gagal::$(ls build/bin | tr '\n' ' ') -- $(echo "$out" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "$out"
