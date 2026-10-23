@@ -30,6 +30,12 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
+      # Without makensis, wails build -nsis silently skips the installer.
+      - name: Install NSIS
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+
       - name: Tes
         run: scripts/ci-test.sh
 
