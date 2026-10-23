@@ -31,7 +31,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
       - name: Tes
-        run: go test ./internal/...
+        run: scripts/ci-test.sh
 
       - name: Siapkan versi
         id: meta
