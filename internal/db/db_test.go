@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io/fs"
@@ -204,6 +205,8 @@ func TestReleasedMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
+		// Git on Windows may check the file out with CRLF line endings.
+		body = bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
 		if got := fmt.Sprintf("%x", sha256.Sum256(body)); got != want {
 			t.Errorf("%s sudah dirilis dan tidak boleh diubah; buat file migrasi baru", name)
 		}
