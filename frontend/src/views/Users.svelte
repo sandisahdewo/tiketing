@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import Select from '../components/Select.svelte'
   import SortHeader from '../components/SortHeader.svelte'
   import { sortRows, type Sort } from '../lib/sort'
@@ -139,6 +140,7 @@
 {#if editing}
   <Modal title={editing.id ? 'Ubah Pengguna' : 'Tambah Pengguna'} onclose={() => (editing = null)}>
     <form id="user-form" class="space-y-4" onsubmit={save} novalidate>
+      <FormAlert message={form.general} />
       <Field label="Username" id="username" {form} name="username" hint="3-32 karakter: huruf kecil, angka, titik, minus, garis bawah">
         <input id="username" class="input" bind:value={editing.username} autocomplete="off" />
       </Field>
@@ -164,7 +166,6 @@
       >
         <input id="password" class="input" type="password" bind:value={editing.password} autocomplete="new-password" />
       </Field>
-      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (editing = null)}>Batal</button>

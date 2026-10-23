@@ -101,6 +101,16 @@ git push origin v0.2.0
 
 GitHub Actions (`.github/workflows/release.yml`) akan menjalankan tes, membangun `tiket.exe` dan installer, menandatangani file, membuat `latest.json`, lalu menerbitkan rilis.
 
-Aplikasi mengecek update saat dibuka dan lewat tombol **Cek Update** di Pengaturan. File update diverifikasi (sha256 + tanda tangan ed25519) sebelum mengganti exe. Client yang versi *major.minor*-nya berbeda dari server ditolak, jadi **update PC server lebih dulu**.
+Nomor versi `MAJOR.MINOR.PATCH`:
 
-Build lokal (tanpa `-ldflags` dari workflow) tidak punya URL update, sehingga menampilkan "update belum dikonfigurasi".
+- **PATCH** (0.2.0 → 0.2.1): perbaikan bug tanpa mengubah struktur database maupun komunikasi client–server. Client dan server boleh berbeda patch.
+- **MINOR/MAJOR** (0.2.x → 0.3.0): ada perubahan struktur database (file migrasi baru) atau API. Client yang beda *major.minor* dengan server ditolak dan wajib update.
+
+Cara update berjalan:
+
+- **PC server** mengecek rilis terbaru di GitHub saat aplikasi dibuka (sebelum login) dan setiap 30 menit. Muncul banner "Versi X tersedia — Update Sekarang", atau jendela wajib kalau rilisnya bertanda `[wajib]`.
+- **PC client** tidak mengecek internet. Client mengikuti versi server dan mengunduh exe dari PC server lewat jaringan lokal (`/update/manifest`, `/update/download`), dengan tanda tangan yang sama seperti rilis. Kalau *major.minor*-nya berbeda, update menjadi wajib. Kalau server lebih lama, muncul pesan agar server diupdate dulu.
+- Server hanya membagikan exe-nya kalau file itu sama persis dengan sebuah rilis. Cocok tidaknya dicek dengan `latest.json` rilis versinya, yang disimpan di `%AppData%\Tiket\update`.
+- File update diverifikasi (sha256 + tanda tangan ed25519) sebelum mengganti exe. Data dan migrasi database berjalan otomatis saat aplikasi dibuka ulang.
+
+Build lokal (tanpa `-ldflags` dari workflow) tidak mengecek internet, dan exe-nya tidak dibagikan ke client. Installer untuk pengguna sebaiknya diambil dari halaman rilis GitHub.

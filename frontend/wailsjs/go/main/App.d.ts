@@ -96,7 +96,7 @@ export function SetTicketActive(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetupClient(arg1:string):Promise<void>;
 
-export function SetupServer(arg1:number,arg2:string):Promise<void>;
+export function SetupServer(arg1:number):Promise<void>;
 
 export function Status():Promise<model.Status>;
 

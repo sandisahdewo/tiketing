@@ -733,6 +733,9 @@ export namespace updater {
 	    latest: string;
 	    notes: string;
 	    mandatory: boolean;
+	    fromServer: boolean;
+	    manual: boolean;
+	    serverBehind: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
@@ -746,6 +749,9 @@ export namespace updater {
 	        this.latest = source["latest"];
 	        this.notes = source["notes"];
 	        this.mandatory = source["mandatory"];
+	        this.fromServer = source["fromServer"];
+	        this.manual = source["manual"];
+	        this.serverBehind = source["serverBehind"];
 	    }
 	}
 

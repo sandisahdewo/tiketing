@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,8 +16,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Schema changes are applied automatically when the app opens a database:
+// PRAGMA user_version counts the migration files already applied, and every
+// newer file runs once, in name order, after a backup of the database. A
+// released migration file is never edited; a change to the structure is a new
+// file (002_..., 003_...). TestReleasedMigrations guards this.
+//
 //go:embed migrations/*.sql
-var migrationFiles embed.FS
+var embedded embed.FS
+
+// migrationFiles holds the migrations/ folder; tests swap it.
+var migrationFiles fs.FS = embedded
 
 const keepBackups = 14
 
@@ -36,7 +46,7 @@ func Open(path string) (*sql.DB, error) {
 }
 
 func migrations() ([]string, error) {
-	entries, err := migrationFiles.ReadDir("migrations")
+	entries, err := fs.ReadDir(migrationFiles, "migrations")
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +67,10 @@ func Migrate(conn *sql.DB, backupDir string) error {
 	if err != nil {
 		return err
 	}
-	if current >= len(names) {
+	if current > len(names) {
+		return fmt.Errorf("Database ini dari versi aplikasi yang lebih baru (struktur v%d, aplikasi ini v%d). Pasang versi aplikasi terbaru.", current, len(names))
+	}
+	if current == len(names) {
 		return nil
 	}
 	if current > 0 {
@@ -66,7 +79,7 @@ func Migrate(conn *sql.DB, backupDir string) error {
 		}
 	}
 	for i := current; i < len(names); i++ {
-		body, err := migrationFiles.ReadFile("migrations/" + names[i])
+		body, err := fs.ReadFile(migrationFiles, "migrations/"+names[i])
 		if err != nil {
 			return err
 		}
@@ -212,9 +225,12 @@ func Prepare(src, workDir string, live *sql.DB) (BackupInfo, string, error) {
 		conn.Close()
 		return fail(fmt.Errorf("Backup tidak bisa disesuaikan ke versi aplikasi ini: %w", err))
 	}
-	if err := sameSchema(live, conn); err != nil {
+	if diffs, err := schemaDiff(live, conn); err != nil {
 		conn.Close()
-		return fail(err)
+		return fail(ErrNotBackup)
+	} else if len(diffs) > 0 {
+		conn.Close()
+		return fail(fmt.Errorf("Struktur data backup tidak cocok dengan aplikasi ini: %s", diffs))
 	}
 	var admins int
 	if err := conn.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin' AND deleted_at IS NULL").Scan(&admins); err != nil || admins == 0 {
@@ -275,20 +291,70 @@ func schema(conn *sql.DB) (map[string]string, error) {
 	return out, nil
 }
 
-// sameSchema reports how the structure of got differs from want.
-func sameSchema(want, got *sql.DB) error {
-	w, err := schema(want)
+// Verify checks that a migrated database has exactly the structure the
+// migrations of this version create. A database that differs, such as one
+// from a trial build whose migrations were later rewritten, would fail in
+// odd places, so the app refuses to open it instead.
+func Verify(conn *sql.DB) error {
+	want, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return err
 	}
+	defer want.Close()
+	want.SetMaxOpenConns(1)
+	if err := Migrate(want, ""); err != nil {
+		return err
+	}
+	diffs, err := schemaDiff(want, conn)
+	if err != nil {
+		return err
+	}
+	if len(diffs) > 0 {
+		return fmt.Errorf("Struktur database tidak cocok dengan versi aplikasi ini: %s", diffs)
+	}
+	return nil
+}
+
+// schemaDiffs lists how one database structure differs from another.
+type schemaDiffs []string
+
+func (d schemaDiffs) String() string {
+	if len(d) > 5 {
+		d = append(d[:5:5], fmt.Sprintf("dan %d lainnya", len(d)-5))
+	}
+	return strings.Join(d, "; ")
+}
+
+// schemaDiff reports how the structure of got differs from want.
+func schemaDiff(want, got *sql.DB) (schemaDiffs, error) {
+	w, err := schema(want)
+	if err != nil {
+		return nil, err
+	}
 	g, err := schema(got)
 	if err != nil {
-		return ErrNotBackup
+		return nil, err
 	}
-	var diffs []string
+	// A missing table is reported once, not with each of its columns and indexes.
+	missing := map[string]bool{}
+	for k := range w {
+		if t, ok := strings.CutPrefix(k, "tabel "); ok && g[k] == "" {
+			missing[t] = true
+		}
+	}
+	partOfMissing := func(k, v string) bool {
+		if c, ok := strings.CutPrefix(k, "kolom "); ok {
+			return missing[strings.SplitN(c, ".", 2)[0]]
+		}
+		t, ok := strings.CutPrefix(v, "pada tabel ")
+		return ok && missing[t]
+	}
+	var diffs schemaDiffs
 	for k, v := range w {
 		if gv, ok := g[k]; !ok {
-			diffs = append(diffs, k+" tidak ada")
+			if !partOfMissing(k, v) || strings.HasPrefix(k, "tabel ") {
+				diffs = append(diffs, k+" tidak ada")
+			}
 		} else if gv != v {
 			diffs = append(diffs, k+" berbeda")
 		}
@@ -298,14 +364,8 @@ func sameSchema(want, got *sql.DB) error {
 			diffs = append(diffs, k+" tidak dikenal")
 		}
 	}
-	if len(diffs) == 0 {
-		return nil
-	}
 	sort.Strings(diffs)
-	if len(diffs) > 5 {
-		diffs = append(diffs[:5], fmt.Sprintf("dan %d lainnya", len(diffs)-5))
-	}
-	return fmt.Errorf("Struktur data backup tidak cocok dengan aplikasi ini: %s", strings.Join(diffs, "; "))
+	return diffs, nil
 }
 
 func copyFile(dst, src string) error {

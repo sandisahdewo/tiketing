@@ -49,9 +49,8 @@ jobs:
 
       - name: Build
         run: |
-          MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
           wails build -platform windows/amd64 -nsis -clean \
-            -ldflags "-X main.appVersion=${{ steps.meta.outputs.version }} -X tiket/internal/updater.ManifestURL=${MANIFEST_URL}"
+            -ldflags "-X main.appVersion=${{ steps.meta.outputs.version }} -X tiket/internal/updater.ReleasesURL=https://github.com/${GITHUB_REPOSITORY}/releases"
 
       - name: Tanda tangani & buat latest.json
         env:

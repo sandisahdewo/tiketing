@@ -951,23 +951,3 @@ func TestCounters(t *testing.T) {
 		t.Errorf("print terminal %q", printed)
 	}
 }
-
-func TestSetupCounter(t *testing.T) {
-	local, _ := newLocal(t)
-	if err := local.SetupCounter("server-pc", "SERVER", "LOKET UTAMA"); err != nil {
-		t.Fatal(err)
-	}
-	c := must(local.Store.CounterByDevice("server-pc"))
-	if c.Name != "LOKET UTAMA" || c.InvoiceCode != "1" {
-		t.Errorf("first counter: %+v", c)
-	}
-	// Running setup again keeps the counter; another PC gets the next code.
-	must(0, local.SetupCounter("server-pc", "SERVER", "LOKET LAIN"))
-	must(0, local.SetupCounter("pc-2", "PC2", "LOKET DUA"))
-	if c := must(local.Store.CounterByDevice("server-pc")); c.Name != "LOKET UTAMA" {
-		t.Errorf("setup changed the counter: %+v", c)
-	}
-	if c := must(local.Store.CounterByDevice("pc-2")); c.InvoiceCode != "2" {
-		t.Errorf("second counter code: %+v", c)
-	}
-}

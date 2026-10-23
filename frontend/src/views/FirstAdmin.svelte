@@ -1,6 +1,7 @@
 <script lang="ts">
   import { App, model, errorMessage } from '../lib/api'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import { FormState, required, maxLength, username as usernameRule } from '../lib/form.svelte'
 
   let { ondone }: { ondone: () => void } = $props()
@@ -37,6 +38,7 @@
     <h1 class="text-2xl font-bold text-brand-700">Buat Akun Admin</h1>
     <p class="mt-1 text-sm text-slate-500">Belum ada pengguna. Buat akun admin pertama untuk mengelola tiket, pengguna, dan laporan.</p>
     <div class="mt-6 space-y-4">
+      <FormAlert message={form.general} />
       <Field label="Username" id="u" {form} name="username" hint="3-32 karakter: huruf kecil, angka, titik, minus, garis bawah">
         <input id="u" class="input" bind:value={username} autocomplete="off" />
       </Field>
@@ -49,7 +51,6 @@
       <Field label="Ulangi password" id="c" {form} name="confirm">
         <input id="c" class="input" type="password" bind:value={confirm} />
       </Field>
-      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </div>
     <button class="btn btn-primary mt-6 w-full py-2.5" disabled={busy}>{busy ? 'Menyimpan…' : 'Buat Admin'}</button>
   </form>

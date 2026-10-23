@@ -1,10 +1,14 @@
 package db
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestBackupTo(t *testing.T) {
@@ -165,6 +169,7 @@ func TestPrepare(t *testing.T) {
 	}{
 		{"extra column", backup("extra.db", "ALTER TABLE sales ADD COLUMN note TEXT"), "kolom sales.note tidak dikenal"},
 		{"missing index", backup("noindex.db", "DROP INDEX sales_counter_created"), "indeks sales_counter_created tidak ada"},
+		{"missing table", backup("notable.db", "DROP TABLE sale_prints"), "cocok dengan aplikasi ini: tabel sale_prints tidak ada"},
 		{"no admin", backup("noadmin.db", "UPDATE users SET role = 'kasir'"), "admin"},
 		{"corrupt", corrupt, ""},
 	} {
@@ -183,5 +188,96 @@ func TestPrepare(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("refused backups must leave no copies, work holds %v", names)
+	}
+}
+
+// Migration files that are already on users' PCs. They must never change:
+// a change to the structure goes in a new file, which is then added here
+// once released.
+var releasedMigrations = map[string]string{
+	"001_init.sql": "364a244e63669c6482c41cb3253e141a4365126a0e735c4e252ea229cd1b40b2",
+}
+
+func TestReleasedMigrations(t *testing.T) {
+	for name, want := range releasedMigrations {
+		body, err := fs.ReadFile(migrationFiles, "migrations/"+name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(body)); got != want {
+			t.Errorf("%s sudah dirilis dan tidak boleh diubah; buat file migrasi baru", name)
+		}
+	}
+}
+
+// An installed app keeps its data when a new version adds a migration: only
+// the new file runs, after a backup, and Verify accepts the result.
+func TestMigrateUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "tiket.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	backups := filepath.Join(dir, "backups")
+	if err := Migrate(conn, backups); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec("INSERT INTO settings (key, value) VALUES ('business_name', 'Uji')"); err != nil {
+		t.Fatal(err)
+	}
+
+	init, _ := fs.ReadFile(embedded, "migrations/001_init.sql")
+	migrationFiles = fstest.MapFS{
+		"migrations/001_init.sql":  {Data: init},
+		"migrations/002_notes.sql": {Data: []byte("ALTER TABLE sales ADD COLUMN note TEXT NOT NULL DEFAULT '';")},
+	}
+	defer func() { migrationFiles = embedded }()
+
+	if err := Migrate(conn, backups); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	var name string
+	conn.QueryRow("PRAGMA user_version").Scan(&version)
+	conn.QueryRow("SELECT value FROM settings WHERE key = 'business_name'").Scan(&name)
+	if version != 2 || name != "Uji" {
+		t.Errorf("after upgrade: version %d, data %q", version, name)
+	}
+	if _, err := conn.Exec("UPDATE sales SET note = 'x'"); err != nil {
+		t.Errorf("new column: %v", err)
+	}
+	if files, _ := filepath.Glob(filepath.Join(backups, "*pre-migrate-v1.db")); len(files) != 1 {
+		t.Errorf("backup before migration: %v", files)
+	}
+	if err := Verify(conn); err != nil {
+		t.Errorf("Verify after upgrade: %v", err)
+	}
+}
+
+func TestVerify(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "tiket.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := Migrate(conn, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(conn); err != nil {
+		t.Fatalf("fresh database: %v", err)
+	}
+
+	// A trial database whose structure no migration of this version made.
+	conn.Exec("DROP INDEX sales_counter_created")
+	if err := Verify(conn); err == nil || !strings.Contains(err.Error(), "indeks sales_counter_created tidak ada") {
+		t.Errorf("changed structure: %v", err)
+	}
+
+	// A database from a newer app is never opened by an older one.
+	conn.Exec("PRAGMA user_version = 99")
+	if err := Migrate(conn, dir); err == nil || !strings.Contains(err.Error(), "lebih baru") {
+		t.Errorf("newer database: %v", err)
 	}
 }

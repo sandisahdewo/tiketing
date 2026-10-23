@@ -7,6 +7,7 @@
   import type { Sort } from '../lib/sort'
   import MoneyInput from '../components/MoneyInput.svelte'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
   import { formatMoney, formatRp } from '../lib/money'
@@ -265,6 +266,7 @@
 {#if editing}
   <Modal title={editing.id ? 'Ubah Tiket' : 'Tambah Tiket'} onclose={() => (editing = null)}>
     <form id="ticket-form" class="space-y-4" onsubmit={save} novalidate>
+      <FormAlert message={form.general} />
       <Field label="Nama tiket" id="name" {form} name="name">
         <input id="name" class="input" bind:value={editing.name} maxlength="100" />
       </Field>
@@ -295,7 +297,6 @@
           <span class="mt-1 text-sm opacity-90">({formatMoney(editing.price ?? 0)})</span>
         </div>
       </Field>
-      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (editing = null)}>Batal</button>

@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"strconv"
 	"strings"
 
 	"tiket/internal/model"
@@ -146,28 +145,6 @@ func (s *Store) AssignCounter(counterID int64, deviceID, deviceName string, forc
 		}
 	}
 	return tx.Commit()
-}
-
-// NextCounterCode is the smallest number not yet used as an invoice code.
-func (s *Store) NextCounterCode() (string, error) {
-	used := map[string]bool{}
-	rows, err := s.DB.Query("SELECT invoice_code FROM counters")
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var code string
-		if err := rows.Scan(&code); err != nil {
-			return "", err
-		}
-		used[code] = true
-	}
-	for n := 1; ; n++ {
-		if code := strconv.Itoa(n); !used[code] {
-			return code, rows.Err()
-		}
-	}
 }
 
 // TouchCounter records that the PC deviceID was just used.

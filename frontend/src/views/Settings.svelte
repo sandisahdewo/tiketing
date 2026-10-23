@@ -2,10 +2,11 @@
   import { App, model, handleError, errorMessage } from '../lib/api'
   import type { main } from '../../wailsjs/go/models'
   import { session, isAdmin } from '../lib/session.svelte'
-  import { updateState } from '../lib/update.svelte'
+  import { updateState, checkUpdate } from '../lib/update.svelte'
   import { toast } from '../lib/toast.svelte'
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import Select from '../components/Select.svelte'
   import { FormState, required, maxLength } from '../lib/form.svelte'
   import { formatDateTime } from '../lib/date'
@@ -27,7 +28,8 @@
 
   const localForm = new FormState(() => ({}))
   // Printing problems belong to the printer field.
-  const localFields = { paperWidth: /kertas/i, printerName: /printer|cetak/i }
+  // "Printer belum dipilih" is about the field; a print that fails is not.
+  const localFields = { paperWidth: /kertas/i, printerName: /printer belum dipilih/i }
 
   // This PC's counter. Only an admin picks it, from the counters in the Loket menu.
   let myCounter = $state<model.Counter | null>(null)
@@ -278,16 +280,18 @@
     }
   }
 
-  async function checkUpdate() {
+  async function checkNow() {
     if (checking) return
     checking = true
     updateMessage = ''
     try {
-      const u = await App.CheckUpdate()
-      updateState.info = u
+      const u = await checkUpdate()
       updateState.dismissed = false
-      if (!u.configured) updateMessage = 'Update otomatis belum dikonfigurasi pada build ini.'
+      if (u.serverBehind) updateMessage = `Server masih versi ${u.latest}. Update komputer server dulu.`
+      else if (u.manual) updateMessage = `Server sudah versi ${u.latest}, tapi filenya tidak bisa dibagikan. Pasang installer versi ${u.latest} di komputer ini.`
+      else if (!u.configured) updateMessage = 'Update otomatis belum dikonfigurasi pada build ini.'
       else if (u.available) updateMessage = `Versi ${u.latest} tersedia. Lihat banner di atas.`
+      else if (u.fromServer) updateMessage = 'Aplikasi sudah sama dengan versi server.'
       else updateMessage = 'Aplikasi sudah versi terbaru.'
     } catch (e) {
       updateMessage = errorMessage(e)
@@ -319,6 +323,7 @@
       <h2 class="font-semibold">Komputer ini</h2>
       <p class="text-sm text-slate-500">Hanya berlaku untuk komputer ini.</p>
       <div class="mt-4 space-y-4">
+        <FormAlert message={localForm.general} />
         <Field label="Loket" id="counter" error={counterError}>
           {#if myCounter}
             <p class="text-sm"><b>{myCounter.name}</b> <span class="text-slate-500">· kode nota {myCounter.invoiceCode}</span></p>
@@ -346,7 +351,6 @@
             <label class="flex items-center gap-2"><input type="radio" bind:group={paperWidth} value={80} /> 80 mm</label>
           </div>
         </Field>
-        {#if localForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{localForm.general}</p>{/if}
         <div class="flex gap-2">
           <button class="btn btn-primary" onclick={saveLocal} disabled={savingLocal}>{savingLocal && !testPrinting ? 'Menyimpan…' : 'Simpan'}</button>
           <button class="btn btn-secondary" onclick={testPrint} disabled={savingLocal}>{testPrinting ? 'Mencetak…' : 'Cetak Tes'}</button>
@@ -380,6 +384,7 @@
         <h2 class="font-semibold">Info usaha di nota</h2>
         <p class="text-sm text-slate-500">Berlaku untuk semua komputer.</p>
         <form class="mt-4 space-y-4" onsubmit={saveBusiness} novalidate>
+          <FormAlert message={businessForm.general} />
           <Field label="Nama usaha" id="bname" form={businessForm} name="businessName">
             <input id="bname" class="input" bind:value={business.businessName} maxlength="100" />
           </Field>
@@ -421,7 +426,6 @@
               <input id="pwe" class="input" bind:value={business.purposeWeekend} maxlength="40" />
             </Field>
           </div>
-          {#if businessForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{businessForm.general}</p>{/if}
           <button class="btn btn-primary" disabled={savingBusiness}>{savingBusiness ? 'Menyimpan…' : 'Simpan'}</button>
         </form>
       </section>
@@ -456,11 +460,15 @@
     <section class="card p-5">
       <h2 class="font-semibold">Update aplikasi</h2>
       <p class="mt-2 text-sm">Versi terpasang: <b>{info.version}</b></p>
-      <button class="btn btn-secondary mt-4" onclick={checkUpdate} disabled={checking}>{checking ? 'Memeriksa…' : 'Cek Update'}</button>
+      <button class="btn btn-secondary mt-4" onclick={checkNow} disabled={checking}>{checking ? 'Memeriksa…' : 'Cek Update'}</button>
       {#if updateMessage}<p class="mt-3 text-sm text-slate-600">{updateMessage}</p>{/if}
-      {#if info.mode === 'server'}
-        <p class="mt-3 text-xs text-slate-500">Update komputer server lebih dulu, baru komputer client.</p>
-      {/if}
+      <p class="mt-3 text-xs text-slate-500">
+        {#if info.mode === 'server'}
+          Komputer server mengambil update dari internet. Setelah server diupdate, komputer client mendapat versi yang sama dari server, tanpa internet.
+        {:else}
+          Komputer ini mengikuti versi komputer server. Update komputer server lebih dulu.
+        {/if}
+      </p>
     </section>
 
     <section class="card p-5">

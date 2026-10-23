@@ -5,8 +5,10 @@
   import Shell from './views/Shell.svelte'
   import Modal from './components/Modal.svelte'
   import Toasts from './components/Toasts.svelte'
+  import UpdateBanner from './views/UpdateBanner.svelte'
   import { App, errorMessage } from './lib/api'
   import { session } from './lib/session.svelte'
+  import { watchUpdates } from './lib/update.svelte'
 
   type Screen = 'loading' | 'setup' | 'error' | 'first-admin' | 'login' | 'main'
 
@@ -66,8 +68,18 @@
   $effect(() => {
     if (screen === 'main' && session.user === null) screen = 'login'
   })
+
+  // Looked for from the start, so a client that the server no longer accepts
+  // is offered the server's version on the login screen already.
+  let canUpdate = $derived(!!session.info?.mode && !!session.info?.ready)
+  $effect(() => {
+    if (canUpdate) return watchUpdates()
+  })
 </script>
 
+<div class="flex h-full flex-col">
+<UpdateBanner />
+<div class="min-h-0 flex-1">
 {#if screen === 'loading'}
   <div class="flex h-full items-center justify-center text-slate-500">Memuat…</div>
 {:else if screen === 'setup'}
@@ -90,6 +102,8 @@
 {:else}
   <Shell onlogout={() => (screen = 'login')} onreset={boot} />
 {/if}
+</div>
+</div>
 
 {#if confirmReset}
   <Modal title="Ubah Mode" onclose={() => (confirmReset = false)} width="max-w-md">

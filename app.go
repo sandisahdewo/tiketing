@@ -51,6 +51,8 @@ type App struct {
 	user  *model.User
 
 	pendingUpdate *updater.Manifest
+	// mirror hands this server PC's exe to the client PCs for their updates
+	mirror *updater.Mirror
 	// a checked copy of the backup chosen for a restore, until it is used or cancelled
 	restoreCopy string
 }
@@ -136,6 +138,10 @@ func (a *App) startServer() error {
 		conn.Close()
 		return fmt.Errorf("Gagal migrasi database: %w", err)
 	}
+	if err := db.Verify(conn); err != nil {
+		conn.Close()
+		return fmt.Errorf("%w. Data tidak diubah; file database: %s", err, a.dbPath())
+	}
 	if err := db.BackupDaily(conn, backupDir); err != nil {
 		slog.Warn("BackupHarian", "error", err.Error())
 	}
@@ -145,8 +151,19 @@ func (a *App) startServer() error {
 		conn.Close()
 		return fmt.Errorf("Port %d sudah dipakai program lain. Ganti port di pengaturan. (%v)", a.cfg.Port, err)
 	}
+	mirror := &updater.Mirror{Dir: filepath.Join(a.dataDir, "update"), Version: appVersion}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := mirror.Prepare(ctx); err != nil {
+			slog.Warn("UpdateMirror", "error", err.Error())
+		}
+	}()
+	mux := http.NewServeMux()
+	mux.Handle("/update/", mirror.Handler())
+	mux.Handle("/", server.Handler(local, appVersion))
 	srv := &http.Server{
-		Handler:           server.Handler(local, appVersion),
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -154,7 +171,7 @@ func (a *App) startServer() error {
 			slog.Error("ServerStopped", "error", err.Error())
 		}
 	}()
-	a.conn, a.httpSrv, a.svc, a.local = conn, srv, service.NewLogged(local), local
+	a.conn, a.httpSrv, a.svc, a.local, a.mirror = conn, srv, service.NewLogged(local), local, mirror
 	return nil
 }
 
@@ -169,7 +186,7 @@ func (a *App) deactivate() {
 		a.conn.Close()
 		a.conn = nil
 	}
-	a.svc, a.local = nil, nil
+	a.svc, a.local, a.mirror = nil, nil, nil
 	a.token, a.user = "", nil
 }
 
@@ -271,23 +288,10 @@ func (a *App) GetAppInfo() AppInfo {
 	}
 }
 
-func cleanTerminal(terminal string) (string, error) {
-	terminal = strings.TrimSpace(terminal)
-	if terminal == "" {
-		return "", model.Invalid("Nama loket wajib diisi")
-	}
-	if len([]rune(terminal)) > 30 {
-		return "", model.Invalid("Nama loket maksimal 30 karakter")
-	}
-	return terminal, nil
-}
-
-func (a *App) SetupServer(port int, terminal string) (err error) {
-	defer func() { applog.Action("SetupServer", err, "port", port, "terminal", terminal) }()
-	terminal, err = cleanTerminal(terminal)
-	if err != nil {
-		return err
-	}
+// SetupServer makes this PC the server. Its counter is then created and
+// chosen by an admin, like on any other PC.
+func (a *App) SetupServer(port int) (err error) {
+	defer func() { applog.Action("SetupServer", err, "port", port) }()
 	if port < 1024 || port > 65535 {
 		return model.Invalid("Port harus antara 1024 dan 65535")
 	}
@@ -295,21 +299,14 @@ func (a *App) SetupServer(port int, terminal string) (err error) {
 	defer a.mu.Unlock()
 	a.deactivate()
 	cfg := a.cfg
-	cfg.Mode, cfg.Port, cfg.Terminal, cfg.ServerURL = config.ModeServer, port, terminal, ""
+	cfg.Mode, cfg.Port, cfg.Terminal, cfg.ServerURL = config.ModeServer, port, "", ""
 	a.cfg = cfg
 	if err := a.activate(); err != nil {
 		a.cfg.Mode = ""
 		a.deactivate()
 		return err
 	}
-	// The server PC gets its counter now, before anyone can log in.
-	if err := a.local.SetupCounter(a.cfg.DeviceID, deviceName(), terminal); err != nil {
-		a.cfg.Mode = ""
-		a.deactivate()
-		return err
-	}
 	a.startErr = ""
-	applog.SetTerminal(terminal)
 	return config.Save(a.dataDir, a.cfg)
 }
 
@@ -1281,10 +1278,27 @@ func (a *App) SaveLocalSettings(printerName string, paperWidth int) (err error) 
 	return config.Save(a.dataDir, a.cfg)
 }
 
+// CheckUpdate looks for a newer version: on the internet for the server PC,
+// and on the server PC for a client, which always follows the server.
 func (a *App) CheckUpdate() (updater.Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	info, m, err := updater.Check(ctx, appVersion)
+	a.mu.Lock()
+	mode, serverURL, mirror := a.cfg.Mode, a.cfg.ServerURL, a.mirror
+	a.mu.Unlock()
+	var info updater.Info
+	var m *updater.Manifest
+	var err error
+	if mode == config.ModeClient {
+		info, m, err = updater.CheckServer(ctx, service.NormalizeServerURL(serverURL), appVersion)
+	} else {
+		info, m, err = updater.Check(ctx, appVersion)
+		// Try again to offer this version to the clients, e.g. after the
+		// internet was down at start.
+		if mirror != nil && info.Configured {
+			go mirror.Prepare(context.Background())
+		}
+	}
 	if err != nil {
 		slog.Warn("CheckUpdate", "error", err.Error())
 		return info, err
@@ -1305,7 +1319,7 @@ func (a *App) CheckUpdate() (updater.Info, error) {
 func (a *App) ApplyUpdate() (err error) {
 	defer func() { a.record(applog.NewOpID(), "ApplyUpdate", err) }()
 	a.mu.Lock()
-	m := a.pendingUpdate
+	m, mirror := a.pendingUpdate, a.mirror
 	a.mu.Unlock()
 	if m == nil {
 		return model.Invalid("Tidak ada update yang tersedia. Klik Cek Update dulu.")
@@ -1314,6 +1328,12 @@ func (a *App) ApplyUpdate() (err error) {
 	defer cancel()
 	if err = updater.DownloadAndApply(ctx, *m); err != nil {
 		return err
+	}
+	// The new version hands itself to the clients from the start.
+	if mirror != nil {
+		if err := mirror.Save(*m); err != nil {
+			slog.Warn("UpdateMirror", "error", err.Error())
+		}
 	}
 	if err := updater.Restart(afterUpdateFlag); err != nil {
 		return fmt.Errorf("Update terpasang, tapi gagal membuka ulang aplikasi. Silakan buka manual. (%v)", err)

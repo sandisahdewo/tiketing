@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from './Modal.svelte'
   import Field from './Field.svelte'
+  import FormAlert from './FormAlert.svelte'
   import SortHeader from './SortHeader.svelte'
   import type { Sort } from '../lib/sort'
   import { FormState, required, maxLength } from '../lib/form.svelte'
@@ -149,6 +150,7 @@
 {#if deleting}
   <Modal title="Hapus Nota" onclose={() => (deleting = null)} width="max-w-md">
     <form id="delete-sale-form" class="space-y-3" onsubmit={removeSale} novalidate>
+      <FormAlert message={deleteForm.general} />
       <p>
         Hapus nota <b class="font-mono">{deleting.invoiceNo}</b> ({formatRp(deleting.total)}, kasir {deleting.cashierName})?
         Nota tidak dihitung lagi di laporan dan tidak bisa dicetak ulang. Nomor nota tidak dipakai ulang.
@@ -157,7 +159,6 @@
         <!-- svelte-ignore a11y_autofocus -->
         <input id="delete-reason" class="input w-full" maxlength="200" bind:value={deleteReason} placeholder="contoh: salah input, transaksi batal" autofocus />
       </Field>
-      {#if deleteForm.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteForm.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (deleting = null)}>Batal</button>

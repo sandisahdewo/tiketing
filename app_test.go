@@ -19,7 +19,11 @@ func TestRestoreDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.deactivate()
-	if err := a.local.SetupCounter(a.cfg.DeviceID, "SERVER", "LOKET 1"); err != nil {
+	c, err := a.local.Store.CreateCounter(model.CounterInput{Name: "LOKET 1", InvoiceCode: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.local.Store.AssignCounter(c.ID, a.cfg.DeviceID, "SERVER", false); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import SortHeader from '../components/SortHeader.svelte'
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
@@ -192,6 +193,7 @@
 {#if editing}
   <Modal title={editing.id ? 'Ubah Loket' : 'Tambah Loket'} onclose={() => (editing = null)}>
     <form id="counter-form" class="space-y-4" onsubmit={save} novalidate>
+      <FormAlert message={form.general} />
       <Field label="Nama loket" id="c-name" {form} name="name" hint="Tampil di nota, laporan, dan pilihan loket. Mengganti nama berlaku di semua laporan.">
         <input id="c-name" class="input" bind:value={editing.name} maxlength="30" />
       </Field>
@@ -201,7 +203,6 @@
       <Field label="Kode nota" id="c-code" {form} name="invoiceCode" hint={codeHint}>
         <input id="c-code" class="input w-32 uppercase" bind:value={editing.invoiceCode} maxlength="4" placeholder="1" />
       </Field>
-      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </form>
     {#snippet footer()}
       <button class="btn btn-secondary" onclick={() => (editing = null)}>Batal</button>

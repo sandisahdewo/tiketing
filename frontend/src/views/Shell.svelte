@@ -5,10 +5,8 @@
   import Users from './Users.svelte'
   import Reports from './Reports.svelte'
   import Settings from './Settings.svelte'
-  import UpdateBanner from './UpdateBanner.svelte'
   import { App } from '../lib/api'
   import { session, isAdmin } from '../lib/session.svelte'
-  import { updateState } from '../lib/update.svelte'
   import { clockText } from '../lib/date'
 
   let { onlogout, onreset }: { onlogout: () => void; onreset: () => void } = $props()
@@ -50,12 +48,6 @@
       .catch(() => {})
   })
 
-  $effect(() => {
-    App.CheckUpdate()
-      .then((u) => (updateState.info = u))
-      .catch(() => {})
-  })
-
   let loggingOut = $state(false)
 
   async function logout() {
@@ -94,8 +86,6 @@
       <button class="rounded px-3 py-1.5 font-semibold hover:bg-brand-700" onclick={logout} disabled={loggingOut}>Keluar</button>
     </div>
   </header>
-
-  <UpdateBanner />
 
   <main class="min-h-0 flex-1">
     {#if view === 'pos'}

@@ -2,6 +2,7 @@
   import { App, errorMessage } from '../lib/api'
   import { session } from '../lib/session.svelte'
   import Field from '../components/Field.svelte'
+  import FormAlert from '../components/FormAlert.svelte'
   import { FormState, required } from '../lib/form.svelte'
 
   let { onlogin, onreset }: { onlogin: () => void; onreset: () => void } = $props()
@@ -26,8 +27,10 @@
       onlogin()
     } catch (e) {
       password = ''
-      // A wrong login is reported under the password field.
-      form.fail(errorMessage(e), { password: /username atau password|password/i, username: /username/i })
+      // A wrong login is not an input mistake: it goes above the fields.
+      form.fail(errorMessage(e))
+      // The cleared password is not an input mistake; show only the message above.
+      form.submitted = false
     } finally {
       busy = false
     }
@@ -39,13 +42,13 @@
     <h1 class="text-center text-3xl font-bold tracking-wide text-brand-700">TIKET</h1>
     <p class="mt-1 text-center text-sm text-slate-500">{session.info?.terminal}</p>
     <div class="mt-6 space-y-4">
+      <FormAlert message={form.general} />
       <Field label="Username" id="u" {form} name="username">
         <input id="u" class="input" bind:this={userEl} bind:value={username} autocomplete="off" />
       </Field>
       <Field label="Password" id="p" {form} name="password">
         <input id="p" class="input" type="password" bind:value={password} />
       </Field>
-      {#if form.general}<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{form.general}</p>{/if}
     </div>
     <button class="btn btn-primary mt-6 w-full py-2.5" disabled={busy}>{busy ? 'Masuk…' : 'Masuk'}</button>
   </form>

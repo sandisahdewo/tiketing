@@ -470,29 +470,6 @@ func (l *Local) DeviceCounter(deviceID string) (model.Counter, error) {
 	return c, err
 }
 
-// SetupCounter gives the server PC a counter at first setup: a new one called
-// name with the next free number as invoice code. It is
-// called by the server app itself, before anyone can log in.
-func (l *Local) SetupCounter(deviceID, deviceName, name string) error {
-	if _, err := l.Store.CounterByDevice(deviceID); err == nil {
-		return nil
-	}
-	in := model.CounterInput{Name: name, InvoiceCode: "1"}
-	if err := validateCounter(&in); err != nil {
-		return err
-	}
-	code, err := l.Store.NextCounterCode()
-	if err != nil {
-		return err
-	}
-	in.InvoiceCode = code
-	c, err := l.Store.CreateCounter(in)
-	if err != nil {
-		return err
-	}
-	return l.Store.AssignCounter(c.ID, deviceID, cleanDeviceName(deviceName), false)
-}
-
 // today is the server's current date; cashiers only see reports for it.
 func (l *Local) today() string {
 	return l.Store.Now().Format("2006-01-02")

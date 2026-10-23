@@ -58,6 +58,7 @@ ManifestDPIAware true
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
 !define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
 !define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
+!define MUI_WELCOMEPAGE_TEXT "Program ini memasang atau memperbarui ${INFO_PRODUCTNAME} ${INFO_PRODUCTVERSION}.$\r$\n$\r$\nData yang sudah ada (database, pengaturan, backup, dan log) tidak dihapus. Jika versi baru mengubah struktur database, aplikasi menyesuaikannya otomatis saat dibuka, setelah membuat backup.$\r$\n$\r$\nTutup aplikasi ${INFO_PRODUCTNAME} sebelum melanjutkan."
 
 !insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
 # !insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
@@ -67,7 +68,7 @@ ManifestDPIAware true
 
 !insertmacro MUI_UNPAGE_INSTFILES # Uinstalling page
 
-!insertmacro MUI_LANGUAGE "English" # Set the Language of the installer
+!insertmacro MUI_LANGUAGE "Indonesian" # Set the Language of the installer
 
 ## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
 #!uninstfinalize 'signtool --file "%1"'
@@ -84,7 +85,24 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !else
   InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !endif # Default installing folder ($PROGRAMFILES is Program Files folder).
+# A reinstall or update goes to the folder of the existing install.
+InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
 ShowInstDetails show # This will always show the installation details.
+
+# The app's data is not in the install folder but in $APPDATA\Tiket
+# (tiket.db, config.json, backups, logs). Neither installing over an existing
+# install nor uninstalling touches it.
+
+# The exe of a running app cannot be replaced or removed; ask to close it.
+!macro tiket.waitAppClosed
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +7
+    ClearErrors
+    FileOpen $0 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+    IfErrors 0 +3
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Aplikasi ${INFO_PRODUCTNAME} sedang berjalan. Tutup aplikasinya dulu, lalu klik Retry." IDRETRY -3
+    Abort
+    FileClose $0
+!macroend
 
 Function .onInit
    !insertmacro wails.checkArchitecture
@@ -94,6 +112,8 @@ Section
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime
+
+    !insertmacro tiket.waitAppClosed
 
     SetOutPath $INSTDIR
 
@@ -106,10 +126,15 @@ Section
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+    WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+
+    DetailPrint "Data aplikasi tetap di $APPDATA\Tiket"
 SectionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
+
+    !insertmacro tiket.waitAppClosed
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 
@@ -122,4 +147,6 @@ Section "uninstall"
     !insertmacro wails.unassociateCustomProtocols
 
     !insertmacro wails.deleteUninstaller
+
+    DetailPrint "Data aplikasi tidak dihapus: $APPDATA\Tiket"
 SectionEnd
