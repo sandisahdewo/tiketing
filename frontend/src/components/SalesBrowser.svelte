@@ -17,7 +17,7 @@
     waiting = false,
     emptyText = 'Tidak ada transaksi.',
     highlight = null,
-    filter = { category: '', userId: 0, counterId: 0 },
+    filter = { category: '', userId: 0, counterId: 0, shiftTypeId: 0 },
     ondeleted
   }: {
     from: string
@@ -30,8 +30,8 @@
     emptyText?: string
     // a sale to show at the top of the first page and blink (just made)
     highlight?: number | null
-    // optional report filters (category, cashier, counter)
-    filter?: { category: string; userId: number; counterId: number }
+    // optional report filters (category, cashier, counter, shift)
+    filter?: { category: string; userId: number; counterId: number; shiftTypeId: number }
     ondeleted?: () => void
   } = $props()
 

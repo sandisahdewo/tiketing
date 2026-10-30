@@ -57,8 +57,9 @@ type Empty struct{}
 const HeaderOpID = "X-Op-ID"
 
 var (
-	readRoutes  = map[string]bool{"listCounters": true, "deviceCounter": true, "reportFilters": true, "searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true}
-	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted", "category", "userId", "terminal"}
+	readRoutes  = map[string]bool{"listCounters": true, "deviceCounter": true, "reportFilters": true, "searchSales": true, "searchTickets": true, "me": true, "listTickets": true, "getSale": true, "listUsers": true, "getSettings": true, "getLogo": true, "listShiftTypes": true, "shiftStatus": true, "getShift": true, "shiftDay": true}
+	summaryKeys = []string{"id", "active", "saleId", "username", "role", "name", "reason", "period", "from", "to", "deleted", "category", "userId", "terminal", "date", "note",
+		"typeId", "shiftId", "revision", "startTime", "endTime", "replacesSaleId"}
 )
 
 func requestUser(svc service.Service, token string, out any) string {
@@ -95,6 +96,13 @@ func summary(body []byte, out any) []any {
 		attrs = append(attrs, "count", o.Count)
 	case model.Report:
 		attrs = append(attrs, "total", money.Format(o.Total))
+	case model.Shift:
+		attrs = append(attrs, "shift", o.ID, "counter", o.CounterName, "openingCash", money.Format(o.OpeningCash))
+	case model.ShiftClosing:
+		attrs = append(attrs, "closing", o.ID, "expected", money.Format(o.ExpectedCash),
+			"actual", money.Format(o.ActualCash), "difference", money.Format(o.Difference))
+	case model.ShiftType:
+		attrs = append(attrs, "shiftType", o.ID)
 	case model.Ticket:
 		attrs = append(attrs, "ticket", o.ID)
 	case model.User:
@@ -234,6 +242,33 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 	}))
 	route("reportFilters", call(func(t string, _ Empty) (any, error) {
 		return svc.ReportFilters(t)
+	}))
+	route("listShiftTypes", call(func(t string, _ Empty) (any, error) {
+		return svc.ListShiftTypes(t)
+	}))
+	route("saveShiftType", call(func(t string, in model.ShiftTypeInput) (any, error) {
+		return svc.SaveShiftType(t, in)
+	}))
+	route("setShiftTypeActive", call(func(t string, in SetActiveRequest) (any, error) {
+		return Empty{}, svc.SetShiftTypeActive(t, in.ID, in.Active)
+	}))
+	route("shiftStatus", call(func(t string, in DeviceRequest) (any, error) {
+		return svc.ShiftStatus(t, in.DeviceID)
+	}))
+	route("openShift", call(func(t string, in model.OpenShiftInput) (any, error) {
+		return svc.OpenShift(t, in)
+	}))
+	route("closeShift", call(func(t string, in model.CloseShiftInput) (any, error) {
+		return svc.CloseShift(t, in)
+	}))
+	route("getShift", call(func(t string, in IDRequest) (any, error) {
+		return svc.GetShift(t, in.ID)
+	}))
+	route("shiftDay", call(func(t string, in model.ShiftDayQuery) (any, error) {
+		return svc.ShiftDay(t, in)
+	}))
+	route("recordShiftClosingPrint", call(func(t string, in IDRequest) (any, error) {
+		return Empty{}, svc.RecordShiftClosingPrint(t, in.ID)
 	}))
 	route("listCounters", call(func(t string, _ Empty) (any, error) {
 		return svc.ListCounters(t)

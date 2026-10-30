@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import Modal from './Modal.svelte'
   import ReceiptPaper from './ReceiptPaper.svelte'
   import { App, handleError } from '../lib/api'
@@ -9,15 +10,21 @@
     saleId,
     title = 'Nota',
     newTransaction = false,
+    autoPrint = false,
     onclose,
-    onview
+    onview,
+    oncorrect
   }: {
     saleId: number
     title?: string
     newTransaction?: boolean
+    // print the receipt as soon as it opens (a sale just paid)
+    autoPrint?: boolean
     onclose: () => void
     // shows the sale in the transaction list
     onview?: () => void
+    // starts correcting the sale (a mistake noticed right after paying)
+    oncorrect?: () => void
   } = $props()
 
   let view = $state<main.ReceiptView | null>(null)
@@ -52,6 +59,9 @@
     }
   }
 
+  // A paid sale prints without a click; the button stays for a reprint.
+  if (untrack(() => autoPrint)) print()
+
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'F9' || (e.ctrlKey && e.key.toLowerCase() === 'p')) {
       e.preventDefault()
@@ -80,8 +90,15 @@
     {/if}
   </div>
   {#snippet footer()}
-    {#if onview}
-      <button class="btn btn-secondary mr-auto" onclick={onview} disabled={printing}>Lihat Transaksi</button>
+    {#if onview || oncorrect}
+      <div class="mr-auto flex gap-2">
+        {#if onview}
+          <button class="btn btn-secondary" onclick={onview} disabled={printing}>Lihat Transaksi</button>
+        {/if}
+        {#if oncorrect}
+          <button class="btn btn-secondary" onclick={oncorrect} disabled={printing || !view || view.deleted}>Koreksi</button>
+        {/if}
+      </div>
     {/if}
     <button class="btn btn-secondary" onclick={print} disabled={printing || !view || view.deleted}>
       {printing ? 'Mencetak…' : view && view.printCount > 0 ? `Cetak Ulang (F9)` : 'Cetak Nota (F9)'}

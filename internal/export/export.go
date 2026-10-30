@@ -54,6 +54,14 @@ func counterName(s model.Sale) string {
 	return s.Terminal
 }
 
+// shiftName is the shift a sale was made in, "-" for sales from before shifts.
+func shiftName(s model.Sale) string {
+	if s.ShiftName != "" {
+		return s.ShiftName
+	}
+	return "-"
+}
+
 func title(d Data) string {
 	name := strings.TrimSpace(d.Settings.BusinessName)
 	if name == "" {

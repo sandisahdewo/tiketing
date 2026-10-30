@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -346,6 +347,14 @@ func (l *Local) DeleteUser(token string, id int64) error {
 			return err
 		}
 	}
+	// An open shift would keep its counter from opening another one.
+	open, err := l.Store.OpenShiftOf(id)
+	if err != nil {
+		return err
+	}
+	if open != nil {
+		return model.Invalid(fmt.Sprintf("%s masih punya shift %s yang terbuka di %s. Tutup shift itu dulu.", target.FullName, open.Name, open.CounterName))
+	}
 	if err := l.Store.DeleteUser(id); err != nil {
 		return err
 	}
@@ -382,8 +391,39 @@ func (l *Local) CreateSale(token string, in model.SaleInput) (model.Sale, error)
 	if in.Paid < 0 || in.Paid > maxPrice*maxQty {
 		return model.Sale{}, model.Invalid("Jumlah bayar tidak valid")
 	}
+	var reason string
+	if in.ReplacesSaleID > 0 {
+		if reason, err = l.saleChange(u, in.ReplacesSaleID, in.Reason, "Alasan koreksi wajib diisi"); err != nil {
+			return model.Sale{}, err
+		}
+	}
 	// The server, not the PC, decides the counter: the one assigned to it.
-	return l.Store.CreateSale(u.ID, in.DeviceID, items, in.Paid)
+	return l.Store.CreateSale(u.ID, in.DeviceID, items, in.Paid, in.ReplacesSaleID, reason)
+}
+
+// saleChange checks that the user may delete or correct a sale, which only an
+// admin may: a cashier could otherwise take money by lowering a sale after
+// the customer left. It returns the reason, trimmed; missing is the message
+// when there is none.
+func (l *Local) saleChange(u model.User, id int64, reason, missing string) (string, error) {
+	if u.Role != model.RoleAdmin {
+		return "", model.ErrForbidden
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "", model.Invalid(missing)
+	}
+	if utf8.RuneCountInString(reason) > 200 {
+		return "", model.Invalid("Alasan maksimal 200 karakter")
+	}
+	sale, err := l.Store.GetSale(id)
+	if err != nil {
+		return "", err
+	}
+	if sale.DeletedAt != nil {
+		return "", model.Invalid("Nota sudah dihapus")
+	}
+	return reason, nil
 }
 
 func (l *Local) GetSale(token string, id int64) (model.Sale, error) {
@@ -526,16 +566,13 @@ func (l *Local) SearchSales(token string, q model.SalePageQuery) (model.SalePage
 }
 
 func (l *Local) DeleteSale(token string, in model.DeleteSaleInput) error {
-	u, err := l.user(token, model.RoleAdmin)
+	u, err := l.user(token)
 	if err != nil {
 		return err
 	}
-	reason := strings.TrimSpace(in.Reason)
-	if reason == "" {
-		return model.Invalid("Alasan hapus nota wajib diisi")
-	}
-	if utf8.RuneCountInString(reason) > 200 {
-		return model.Invalid("Alasan maksimal 200 karakter")
+	reason, err := l.saleChange(u, in.ID, in.Reason, "Alasan hapus nota wajib diisi")
+	if err != nil {
+		return err
 	}
 	return l.Store.DeleteSale(in.ID, u.ID, reason)
 }

@@ -6,6 +6,7 @@
   import type { Sort } from '../lib/sort'
   import { FormState, required, maxLength } from '../lib/form.svelte'
   import ReceiptModal from './ReceiptModal.svelte'
+  import CorrectionModal from './CorrectionModal.svelte'
   import { App, model, errorMessage } from '../lib/api'
   import { formatRp } from '../lib/money'
   import { formatDateTime } from '../lib/date'
@@ -36,7 +37,13 @@
 
   const admin = isAdmin()
 
+  // Only an admin deletes or corrects a sale (the server holds the same rule).
+  function canChange(s: model.Sale): boolean {
+    return admin && !s.deletedAt
+  }
+
   let selectedSale = $state<number | null>(null)
+  let correcting = $state<model.Sale | null>(null)
 
   let deleting = $state<model.Sale | null>(null)
   let deleteReason = $state('')
@@ -76,6 +83,7 @@
       <SortHeader label="No. Nota" key="invoice" {sort} {onsort} />
       <SortHeader label="Kasir" key="cashier" {sort} {onsort} />
       <SortHeader label="Loket" key="terminal" {sort} {onsort} />
+      <SortHeader label="Shift" key="shift" {sort} {onsort} />
       <SortHeader label="Total" key="total" {sort} {onsort} align="right" firstDir="desc" />
       <SortHeader label="Cetak" key="prints" {sort} {onsort} align="center" firstDir="desc" />
       <th></th>
@@ -86,14 +94,19 @@
       <tr class="cursor-pointer hover:bg-slate-50 {s.deletedAt ? 'text-slate-400' : ''} {s.id === flash ? 'row-flash' : ''}" onclick={() => (expanded[s.id] = !expanded[s.id])}>
         <td class="text-slate-400">{expanded[s.id] ? '▾' : '▸'}</td>
         <td>{formatDateTime(s.createdAt)}</td>
-        <td class="font-mono {s.deletedAt ? 'line-through' : ''}">{s.invoiceNo}</td>
+        <td class="font-mono {s.deletedAt ? 'line-through' : ''}">
+          {s.invoiceNo}
+          {#if s.replacesInvoiceNo}<div class="font-sans text-xs text-slate-500">pengganti {s.replacesInvoiceNo}</div>{/if}
+        </td>
         <td>{s.cashierName}</td>
         <td>{s.counterName || s.terminal}</td>
+        <td>{s.shiftName || '–'}</td>
         <td class="text-right font-medium {s.deletedAt ? 'line-through' : ''}">{formatRp(s.total)}</td>
         <td class="text-center text-slate-500">{s.printCount}×</td>
         <td class="whitespace-nowrap text-right">
           <button class="btn btn-secondary px-3 py-1" onclick={(e) => { e.stopPropagation(); selectedSale = s.id }}>Nota</button>
-          {#if admin && !s.deletedAt}
+          {#if canChange(s)}
+            <button class="btn btn-secondary px-3 py-1" onclick={(e) => { e.stopPropagation(); correcting = s }}>Koreksi</button>
             <button class="btn px-3 py-1 text-red-600 hover:bg-red-50" onclick={(e) => { e.stopPropagation(); askDelete(s) }}>Hapus</button>
           {/if}
         </td>
@@ -101,13 +114,15 @@
       {#if s.deletedAt}
         <tr class="bg-red-50/60">
           <td></td>
-          <td colspan="7" class="text-sm text-red-700">Dihapus {formatDateTime(s.deletedAt)} oleh {s.deletedByName}: {s.deleteReason}</td>
+          <td colspan="8" class="text-sm text-red-700">
+            Dihapus {formatDateTime(s.deletedAt)} oleh {s.deletedByName}: {s.deleteReason}{#if s.replacedByInvoiceNo} · diganti nota <span class="font-mono">{s.replacedByInvoiceNo}</span>{/if}
+          </td>
         </tr>
       {/if}
       {#if expanded[s.id]}
         <tr class="bg-slate-50">
           <td></td>
-          <td colspan="7" class="py-2">
+          <td colspan="8" class="py-2">
             <table class="w-full text-sm [&_td]:border-0 [&_td]:py-0.5">
               <tbody>
                 {#each s.items as it (it.id)}
@@ -138,13 +153,17 @@
         </tr>
       {/if}
     {:else}
-      <tr><td colspan="8" class="py-10 text-center text-slate-500">{empty}</td></tr>
+      <tr><td colspan="9" class="py-10 text-center text-slate-500">{empty}</td></tr>
     {/each}
   </tbody>
 </table>
 
 {#if selectedSale !== null}
   <ReceiptModal saleId={selectedSale} onclose={() => (selectedSale = null)} />
+{/if}
+
+{#if correcting}
+  <CorrectionModal sale={correcting} onclose={() => (correcting = null)} />
 {/if}
 
 {#if deleting}

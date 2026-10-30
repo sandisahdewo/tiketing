@@ -196,7 +196,10 @@ func TestPrepare(t *testing.T) {
 // a change to the structure goes in a new file, which is then added here
 // once released.
 var releasedMigrations = map[string]string{
-	"001_init.sql": "364a244e63669c6482c41cb3253e141a4365126a0e735c4e252ea229cd1b40b2",
+	"001_init.sql":             "364a244e63669c6482c41cb3253e141a4365126a0e735c4e252ea229cd1b40b2",
+	"002_cash_closings.sql":    "6ee543c0a48d5797cd9131f892bde284842c0115877f9814baf6d236635b8596",
+	"003_shifts.sql":           "5c7a0777009fd1c8a398252fa3dd73bef2e02e8fd63c30bcdf300816e49095e9",
+	"004_sale_corrections.sql": "b00de1c068d7633daed5703a47951e28943783a953263cca5702847260b72c16",
 }
 
 func TestReleasedMigrations(t *testing.T) {
@@ -230,11 +233,14 @@ func TestMigrateUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	init, _ := fs.ReadFile(embedded, "migrations/001_init.sql")
-	migrationFiles = fstest.MapFS{
-		"migrations/001_init.sql":  {Data: init},
-		"migrations/002_notes.sql": {Data: []byte("ALTER TABLE sales ADD COLUMN note TEXT NOT NULL DEFAULT '';")},
+	// The next release adds a migration after the current ones.
+	names, _ := migrations()
+	next := fstest.MapFS{"migrations/999_notes.sql": {Data: []byte("ALTER TABLE sales ADD COLUMN note TEXT NOT NULL DEFAULT '';")}}
+	for _, n := range names {
+		body, _ := fs.ReadFile(embedded, "migrations/"+n)
+		next["migrations/"+n] = &fstest.MapFile{Data: body}
 	}
+	migrationFiles = next
 	defer func() { migrationFiles = embedded }()
 
 	if err := Migrate(conn, backups); err != nil {
@@ -244,13 +250,13 @@ func TestMigrateUpgrade(t *testing.T) {
 	var name string
 	conn.QueryRow("PRAGMA user_version").Scan(&version)
 	conn.QueryRow("SELECT value FROM settings WHERE key = 'business_name'").Scan(&name)
-	if version != 2 || name != "Uji" {
+	if version != len(names)+1 || name != "Uji" {
 		t.Errorf("after upgrade: version %d, data %q", version, name)
 	}
 	if _, err := conn.Exec("UPDATE sales SET note = 'x'"); err != nil {
 		t.Errorf("new column: %v", err)
 	}
-	if files, _ := filepath.Glob(filepath.Join(backups, "*pre-migrate-v1.db")); len(files) != 1 {
+	if files, _ := filepath.Glob(filepath.Join(backups, fmt.Sprintf("*pre-migrate-v%d.db", len(names)))); len(files) != 1 {
 		t.Errorf("backup before migration: %v", files)
 	}
 	if err := Verify(conn); err != nil {
@@ -282,5 +288,51 @@ func TestVerify(t *testing.T) {
 	conn.Exec("PRAGMA user_version = 99")
 	if err := Migrate(conn, dir); err == nil || !strings.Contains(err.Error(), "lebih baru") {
 		t.Errorf("newer database: %v", err)
+	}
+}
+
+// A database that ran the daily cash closing of 002 (never released, but on
+// trial installs) moves on to shifts: the closings go, three shift types
+// come, and the structure matches a fresh install.
+func TestShiftMigration(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "tiket.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	trial := fstest.MapFS{}
+	for _, n := range []string{"001_init.sql", "002_cash_closings.sql"} {
+		body, _ := fs.ReadFile(embedded, "migrations/"+n)
+		trial["migrations/"+n] = &fstest.MapFile{Data: body}
+	}
+	migrationFiles = trial
+	err = Migrate(conn, filepath.Join(dir, "backups"))
+	migrationFiles = embedded
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"INSERT INTO users (username, full_name, password_hash, role, created_at, updated_at) VALUES ('budi', 'Budi', 'x', 'kasir', '2026-10-05 09:00:00', '2026-10-05 09:00:00')",
+		`INSERT INTO cash_closings (business_date, user_id, revision, counters, transactions, ticket_qty, ticket_total, topup_qty,
+		  topup_total, total, deleted_count, deleted_total, actual_cash, closed_by, closed_at) VALUES ('2026-10-05', 1, 0, '', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, '2026-10-05 17:00:00')`,
+	} {
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Migrate(conn, filepath.Join(dir, "backups")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(conn); err != nil {
+		t.Fatal(err)
+	}
+	var closings, types int
+	conn.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'cash_closings'").Scan(&closings)
+	conn.QueryRow("SELECT COUNT(*) FROM shift_types WHERE active = 1").Scan(&types)
+	if closings != 0 || types != 3 {
+		t.Errorf("after the shift migration: cash_closings %d, shift types %d", closings, types)
 	}
 }

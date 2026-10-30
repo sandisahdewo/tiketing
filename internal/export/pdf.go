@@ -156,13 +156,13 @@ func PDF(d Data) ([]byte, error) {
 			PDFMaxSales)), "", "L", false)
 		return output(p)
 	}
-	t = newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Loket", "Total (Rp)"}, []float64{32, 44, 38, 30, 36}, "LLLLR")
+	t = newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total (Rp)"}, []float64{30, 42, 32, 26, 20, 30}, "LLLLLR")
 	var total int64
 	for _, s := range d.Sales {
-		t.row(false, formatDateTime(s.CreatedAt), s.InvoiceNo, s.CashierName, counterName(s), money.Format(s.Total))
+		t.row(false, formatDateTime(s.CreatedAt), s.InvoiceNo, s.CashierName, counterName(s), shiftName(s), money.Format(s.Total))
 		total += s.Total
 	}
-	t.row(true, "Total", "", "", "", money.Format(total))
+	t.row(true, "Total", "", "", "", "", money.Format(total))
 	return output(p)
 }
 

@@ -247,6 +247,49 @@ func (r *Remote) SaveSettings(token string, in model.Settings) error {
 	return r.call("saveSettings", token, in, nil)
 }
 
+func (r *Remote) ListShiftTypes(token string) ([]model.ShiftType, error) {
+	var out []model.ShiftType
+	return out, r.call("listShiftTypes", token, nil, &out)
+}
+
+func (r *Remote) SaveShiftType(token string, in model.ShiftTypeInput) (model.ShiftType, error) {
+	var out model.ShiftType
+	return out, r.call("saveShiftType", token, in, &out)
+}
+
+func (r *Remote) SetShiftTypeActive(token string, id int64, active bool) error {
+	return r.call("setShiftTypeActive", token, map[string]any{"id": id, "active": active}, nil)
+}
+
+func (r *Remote) ShiftStatus(token, deviceID string) (model.ShiftStatus, error) {
+	var out model.ShiftStatus
+	return out, r.call("shiftStatus", token, map[string]string{"deviceId": deviceID}, &out)
+}
+
+func (r *Remote) OpenShift(token string, in model.OpenShiftInput) (model.Shift, error) {
+	var out model.Shift
+	return out, r.call("openShift", token, in, &out)
+}
+
+func (r *Remote) CloseShift(token string, in model.CloseShiftInput) (model.ShiftClosing, error) {
+	var out model.ShiftClosing
+	return out, r.call("closeShift", token, in, &out)
+}
+
+func (r *Remote) GetShift(token string, id int64) (model.ShiftReport, error) {
+	var out model.ShiftReport
+	return out, r.call("getShift", token, idRequest{id}, &out)
+}
+
+func (r *Remote) ShiftDay(token string, q model.ShiftDayQuery) (model.ShiftDay, error) {
+	var out model.ShiftDay
+	return out, r.call("shiftDay", token, q, &out)
+}
+
+func (r *Remote) RecordShiftClosingPrint(token string, closingID int64) error {
+	return r.call("recordShiftClosingPrint", token, idRequest{closingID}, nil)
+}
+
 func (r *Remote) RecordPrint(token string, in model.PrintInput) error {
 	return r.call("recordPrint", token, in, nil)
 }

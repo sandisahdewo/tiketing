@@ -96,6 +96,31 @@ func useCounter(t *testing.T, svc Service, admin, device, name, code string) mod
 	return c
 }
 
+// onShift lets token sell at the counter of device: it closes the user's
+// shift open elsewhere and (as admin) another user's shift holding that
+// counter, then opens a shift of the suggested type unless one is open there.
+func onShift(t *testing.T, svc Service, admin, token, device string) model.Shift {
+	t.Helper()
+	st := must(svc.ShiftStatus(token, device))
+	if st.Own != nil && st.Own.Shift.CounterID == st.CounterID {
+		return st.Own.Shift
+	}
+	if st.Own != nil {
+		closeShift(t, svc, token, st.Own.Shift.ID)
+	}
+	if st.Blocking != nil {
+		closeShift(t, svc, admin, st.Blocking.ID)
+	}
+	return must(svc.OpenShift(token, model.OpenShiftInput{DeviceID: device, TypeID: st.SuggestedTypeID}))
+}
+
+// closeShift closes an open shift with exactly the cash it should have.
+func closeShift(t *testing.T, svc Service, token string, id int64) model.ShiftClosing {
+	t.Helper()
+	r := must(svc.GetShift(token, id))
+	return must(svc.CloseShift(token, model.CloseShiftInput{ShiftID: id, ActualCash: r.ExpectedCash}))
+}
+
 func exercise(t *testing.T, svc Service, c *clock) {
 	admin, kasir := setup(t, svc)
 
@@ -137,6 +162,10 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	if got := must(svc.ListTickets(admin, "", true, false)); len(got) != 1 || got[0].DeletedAt == nil {
 		t.Fatalf("deleted list wrong: %+v", got)
 	}
+	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: weekday.ID, Qty: 1}}, Paid: 9999999}); err == nil || !strings.Contains(err.Error(), "Buka shift") {
+		t.Fatalf("sold without a shift: %v", err)
+	}
+	onShift(t, svc, admin, kasir, testDevice)
 	if _, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 1}}, Paid: 9999999}); err == nil {
 		t.Fatal("sold a deleted ticket")
 	}
@@ -178,6 +207,7 @@ func exercise(t *testing.T, svc Service, c *clock) {
 		t.Errorf("ticket name should come from relation: %s", again.Items[0].TicketName)
 	}
 
+	onShift(t, svc, admin, admin, testDevice)
 	sale2 := must(svc.CreateSale(admin, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: elder.ID, Qty: 4}}, Paid: 6000000}))
 	if sale2.InvoiceNo != "TKT1202610050002" {
 		t.Errorf("invoice2 = %s", sale2.InvoiceNo)
@@ -187,6 +217,7 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	}
 
 	c.t = time.Date(2026, 10, 14, 10, 0, 0, 0, time.Local)
+	onShift(t, svc, admin, kasir, testDevice)
 	sale3 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
 	if sale3.InvoiceNo != "TKT1202610140001" {
 		t.Errorf("invoice3 = %s", sale3.InvoiceNo)
@@ -237,8 +268,10 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	c.t = time.Date(2026, 11, 3, 10, 18, 0, 0, time.Local)
 	useCounter(t, svc, admin, "pc-25", "LOKET 25", "25")
 	useCounter(t, svc, admin, "pc-26", "LOKET 26", "26")
+	onShift(t, svc, admin, kasir, "pc-25")
 	pony1 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: "pc-25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
 	pony2 := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: "pc-25", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
+	onShift(t, svc, admin, admin, "pc-26")
 	other := must(svc.CreateSale(admin, model.SaleInput{DeviceID: "pc-26", Items: []model.SaleItemInput{{TicketID: couple.ID, Qty: 1}}, Paid: 5000050}))
 	if pony1.InvoiceNo != "PNY25202611030001" || pony2.InvoiceNo != "PNY25202611030002" || other.InvoiceNo != "PNY26202611030001" {
 		t.Errorf("invoice format: %s %s %s", pony1.InvoiceNo, pony2.InvoiceNo, other.InvoiceNo)
@@ -305,6 +338,10 @@ func exercise(t *testing.T, svc Service, c *clock) {
 	if _, err := svc.SaveUser(admin, model.UserInput{Username: "budi", FullName: "Dup", Role: model.RoleKasir, Password: "1234"}); err == nil {
 		t.Error("duplicate username accepted")
 	}
+	if err := svc.DeleteUser(admin, budiID); err == nil || !strings.Contains(err.Error(), "shift Siang yang terbuka di LOKET 25") {
+		t.Errorf("deleted a user with an open shift: %v", err)
+	}
+	closeShift(t, svc, admin, must(svc.ShiftStatus(kasir, "pc-25")).Own.Shift.ID)
 	if err := svc.DeleteUser(admin, budiID); err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +418,7 @@ func TestTopupCategory(t *testing.T) {
 		t.Errorf("update wrong: %+v", entry)
 	}
 
+	onShift(t, svc, admin, kasir, testDevice)
 	sale := must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice,
 		Items: []model.SaleItemInput{
 			{TicketID: entry.ID, Qty: 2},
@@ -414,6 +452,7 @@ func TestKasirReportAndDeleteSale(t *testing.T) {
 	admin, kasir := setup(t, svc)
 	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	sell := func(token string, qty int64) model.Sale {
+		onShift(t, svc, admin, token, testDevice)
 		return must(svc.CreateSale(token, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: qty}}, Paid: qty * 1000000}))
 	}
 
@@ -567,6 +606,7 @@ func TestTicketActive(t *testing.T) {
 		t.Errorf("kasir must not list deleted tickets, got %v", err)
 	}
 
+	onShift(t, svc, admin, kasir, testDevice)
 	_, err := svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}, {TicketID: topup.ID, Qty: 1}}, Paid: 6000000})
 	var ve *model.ValidationError
 	if !errors.As(err, &ve) || !strings.Contains(ve.Message, "Topup") {
@@ -593,12 +633,14 @@ func TestSearchSales(t *testing.T) {
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 50%", Price: 5000000, Category: model.CategoryTopup}))
 
 	c.t = time.Date(2026, 10, 4, 9, 0, 0, 0, time.Local)
+	onShift(t, svc, admin, kasir, testDevice)
 	must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000}))
 	c.t = time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)
 	var sales []model.Sale
 	for i := 0; i < 7; i++ {
 		sales = append(sales, must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: entry.ID, Qty: 1}}, Paid: 1000000})))
 	}
+	onShift(t, svc, admin, admin, testDevice)
 	withTopup := must(svc.CreateSale(admin, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: topup.ID, Qty: 1}}, Paid: 5000000}))
 
 	month := model.SaleQuery{From: "2026-10-01", To: "2026-10-31"}
@@ -730,6 +772,7 @@ func TestSorting(t *testing.T) {
 	}
 
 	sell := func(token string, id int64, qty int64, price int64) model.Sale {
+		onShift(t, svc, admin, token, testDevice)
 		return must(svc.CreateSale(token, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: id, Qty: qty}}, Paid: qty * price}))
 	}
 	s1 := sell(kasir, cheap.ID, 1, 100000)  // 1.000, Budi
@@ -789,7 +832,12 @@ func TestReportFilter(t *testing.T) {
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
 	loket2 := useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")
 	sell := func(token, device string, items ...model.SaleItemInput) {
+		onShift(t, svc, admin, token, device)
 		must(svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10}))
+	}
+	types := map[string]int64{}
+	for _, st := range must(svc.ListShiftTypes(admin)) {
+		types[st.Name] = st.ID
 	}
 	sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 2})                                              // Budi: 20.000
 	sell(kasir, "pc-2", model.SaleItemInput{TicketID: entry.ID, Qty: 1}, model.SaleItemInput{TicketID: topup.ID, Qty: 1}) // Budi: 10.000 + 50.000
@@ -809,6 +857,9 @@ func TestReportFilter(t *testing.T) {
 		{model.ReportFilter{CounterID: loket2.ID}, 2, 16000000, 2},
 		{model.ReportFilter{CounterID: loket2.ID, Category: model.CategoryTicket}, 1, 1000000, 1},
 		{model.ReportFilter{CounterID: 999}, 0, 0, 0},
+		{model.ReportFilter{ShiftTypeID: types["Siang"]}, 3, 18000000, 3}, // every sale is at 09:00
+		{model.ReportFilter{ShiftTypeID: types["Siang"], UserID: siti.ID}, 1, 10000000, 1},
+		{model.ReportFilter{ShiftTypeID: types["Sore"]}, 0, 0, 0},
 	} {
 		q := day
 		q.ReportFilter = tc.f
@@ -833,6 +884,14 @@ func TestReportFilter(t *testing.T) {
 		t.Error("invalid category accepted")
 	}
 
+	if p := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: model.SaleQuery{From: day.From, To: day.To}, Sort: "shift"})); p.Count != 3 || p.Sales[0].ShiftName != "Siang" {
+		t.Errorf("sales should carry their shift: %+v", p.Sales)
+	}
+
+	if err := svc.DeleteUser(admin, siti.ID); err == nil {
+		t.Error("deleted a cashier with an open shift")
+	}
+	closeShift(t, svc, admin, must(svc.ShiftStatus(sitiToken, "pc-2")).Own.Shift.ID)
 	must(0, svc.DeleteUser(admin, siti.ID))
 	f := must(svc.ReportFilters(admin))
 	var names []string
@@ -843,8 +902,13 @@ func TestReportFilter(t *testing.T) {
 	for _, c := range f.Counters {
 		counters = append(counters, c.Name)
 	}
-	if strings.Join(names, ",") != "Budi/false,Pak Admin/false,Siti/true" || strings.Join(counters, ",") != "LOKET 1,LOKET 2" {
-		t.Errorf("filter choices: %v %v", names, counters)
+	var shifts []string
+	for _, st := range f.ShiftTypes {
+		shifts = append(shifts, st.Name)
+	}
+	if strings.Join(names, ",") != "Budi/false,Pak Admin/false,Siti/true" || strings.Join(counters, ",") != "LOKET 1,LOKET 2" ||
+		strings.Join(shifts, ",") != "Siang,Sore,Malam" {
+		t.Errorf("filter choices: %v %v %v", names, counters, shifts)
 	}
 	if _, err := svc.ReportFilters(kasir); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("kasir must not list filter choices: %v", err)
@@ -905,6 +969,7 @@ func TestCounters(t *testing.T) {
 
 	// The server takes the counter from the PC, not from the request.
 	c.t = time.Date(2026, 10, 5, 10, 0, 0, 0, time.Local)
+	onShift(t, svc, admin, kasir, "pc-b")
 	sale := must(sell("pc-b"))
 	if sale.Terminal != "LOKET 2" || sale.CounterID != two.ID || sale.InvoiceNo != "TKTB2202610050001" {
 		t.Errorf("sale at pc-b: %s %d %s", sale.Terminal, sale.CounterID, sale.InvoiceNo)
@@ -949,5 +1014,339 @@ func TestCounters(t *testing.T) {
 	local.Store.DB.QueryRow("SELECT terminal FROM sale_prints WHERE sale_id = ?", sale.ID).Scan(&printed)
 	if printed != "LOKET 3" {
 		t.Errorf("print terminal %q", printed)
+	}
+}
+
+func TestShifts(t *testing.T) {
+	local, clk := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc) // pc-test has LOKET 1
+	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
+	sitiToken := must(svc.Login("siti", "1234")).Token
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
+	useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")
+	sell := func(token, device string, items ...model.SaleItemInput) (model.Sale, error) {
+		return svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10})
+	}
+
+	// The update brings three shift types; only an admin sets them up.
+	types := must(svc.ListShiftTypes(admin))
+	if len(types) != 3 || types[0].Name != "Siang" || types[0].StartTime != "06:00" || types[2].Name != "Malam" || types[2].EndTime != "06:00" {
+		t.Fatalf("starting types: %+v", types)
+	}
+	siang, sore, malam := types[0], types[1], types[2]
+	if _, err := svc.ListShiftTypes(kasir); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir listed shift types: %v", err)
+	}
+	if _, err := svc.SaveShiftType(kasir, model.ShiftTypeInput{Name: "Pagi", StartTime: "05:00", EndTime: "09:00"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir saved a shift type: %v", err)
+	}
+	for _, in := range []model.ShiftTypeInput{
+		{Name: " ", StartTime: "05:00", EndTime: "09:00"},
+		{Name: "siang", StartTime: "05:00", EndTime: "09:00"}, // name taken, any case
+		{Name: strings.Repeat("x", 31), StartTime: "05:00", EndTime: "09:00"},
+		{Name: "Pagi", StartTime: "25:00", EndTime: "09:00"},
+		{Name: "Pagi", StartTime: "05:00", EndTime: "9"},
+		{Name: "Pagi", StartTime: "05:00", EndTime: "05:00"},
+	} {
+		if _, err := svc.SaveShiftType(admin, in); err == nil {
+			t.Errorf("shift type %+v accepted", in)
+		}
+	}
+	pagi := must(svc.SaveShiftType(admin, model.ShiftTypeInput{Name: " Pagi ", StartTime: "5:00", EndTime: "09:30"}))
+	if pagi.Name != "Pagi" || pagi.StartTime != "05:00" || pagi.EndTime != "09:30" || !pagi.Active {
+		t.Errorf("saved type: %+v", pagi)
+	}
+	must(0, svc.SetShiftTypeActive(admin, pagi.ID, false))
+	if err := svc.SetShiftTypeActive(admin, 999, false); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unknown type: %v", err)
+	}
+
+	// Nothing sells before a shift opens; the shift running now is suggested.
+	st := must(svc.ShiftStatus(kasir, testDevice))
+	if st.Own != nil || st.Blocking != nil || st.CounterName != "LOKET 1" || len(st.Types) != 3 || st.SuggestedTypeID != siang.ID ||
+		st.ServerTime != "2026-10-05 09:00:00" {
+		t.Errorf("status before opening: %+v", st)
+	}
+	if _, err := sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 1}); err == nil || !strings.Contains(err.Error(), "Buka shift") {
+		t.Errorf("sold without a shift: %v", err)
+	}
+	for _, in := range []model.OpenShiftInput{
+		{DeviceID: testDevice, TypeID: siang.ID, OpeningCash: -1},
+		{DeviceID: testDevice, TypeID: pagi.ID}, // turned off
+		{DeviceID: testDevice, TypeID: 999},
+		{DeviceID: "pc-none", TypeID: siang.ID},
+	} {
+		if _, err := svc.OpenShift(kasir, in); err == nil {
+			t.Errorf("opened %+v", in)
+		}
+	}
+	budi := must(svc.OpenShift(kasir, model.OpenShiftInput{DeviceID: testDevice, TypeID: siang.ID, OpeningCash: 50000000}))
+	if budi.Name != "Siang" || budi.BusinessDate != "2026-10-05" || budi.ScheduledEndAt != "2026-10-05 14:00:00" || budi.CashierName != "Budi" ||
+		budi.CounterName != "LOKET 1" || budi.OpeningCash != 50000000 || budi.OpenedAt != "2026-10-05 09:00:00" || budi.ClosedAt != nil {
+		t.Errorf("opened: %+v", budi)
+	}
+
+	// One open shift per cashier and per counter; only its cashier or an
+	// admin reaches it.
+	if _, err := svc.OpenShift(kasir, model.OpenShiftInput{DeviceID: "pc-2", TypeID: siang.ID}); err == nil || !strings.Contains(err.Error(), "LOKET 1") {
+		t.Errorf("second shift of a cashier: %v", err)
+	}
+	if _, err := svc.OpenShift(sitiToken, model.OpenShiftInput{DeviceID: testDevice, TypeID: siang.ID}); err == nil || !strings.Contains(err.Error(), "Budi") {
+		t.Errorf("second shift at a counter: %v", err)
+	}
+	if st := must(svc.ShiftStatus(sitiToken, testDevice)); st.Own != nil || st.Blocking == nil || st.Blocking.ID != budi.ID {
+		t.Errorf("status of the next cashier: %+v", st)
+	}
+	if _, err := svc.GetShift(sitiToken, budi.ID); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("siti read budi's shift: %v", err)
+	}
+	if _, err := svc.CloseShift(sitiToken, model.CloseShiftInput{ShiftID: budi.ID}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("siti closed budi's shift: %v", err)
+	}
+
+	// Sales go into the shift, at the counter of the shift only.
+	first := must(sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 2})) // 20.000
+	clk.t = clk.t.Add(4 * time.Hour)
+	must(sell(kasir, testDevice, model.SaleItemInput{TicketID: topup.ID, Qty: 1})) // 50.000
+	if first.ShiftName != "Siang" {
+		t.Errorf("sale shift %q", first.ShiftName)
+	}
+	if _, err := sell(kasir, "pc-2", model.SaleItemInput{TicketID: entry.ID, Qty: 1}); err == nil || !strings.Contains(err.Error(), "masih terbuka di LOKET 1") {
+		t.Errorf("sold at another counter: %v", err)
+	}
+	own := must(svc.ShiftStatus(kasir, testDevice)).Own
+	if own == nil || own.Shift.ID != budi.ID || own.Sales.Transactions != 2 || own.Sales.Total != 7000000 || own.Sales.TicketQty != 2 ||
+		own.Sales.TopupTotal != 5000000 || own.ExpectedCash != 57000000 || own.Closing != nil ||
+		own.Sales.FirstSaleAt != "2026-10-05 09:00:00" || own.Sales.LastSaleAt != "2026-10-05 13:00:00" {
+		t.Errorf("own shift: %+v", own)
+	}
+
+	// Closing: a difference needs a note; a stale revision is refused.
+	clk.t = clk.t.Add(90 * time.Minute)
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, ActualCash: 56900000}); err == nil || !strings.Contains(err.Error(), "Keterangan selisih") {
+		t.Errorf("difference without a note: %v", err)
+	}
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, Revision: 1, ActualCash: 57000000, Note: "x"}); err == nil || !strings.Contains(err.Error(), "Muat ulang") {
+		t.Errorf("correction of an open shift: %v", err)
+	}
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, ActualCash: -1, Note: "x"}); err == nil {
+		t.Error("negative cash accepted")
+	}
+	closing := must(svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, ActualCash: 56900000, Note: " kurang seribu "}))
+	if closing.Revision != 0 || closing.ExpectedCash != 57000000 || closing.Difference != -100000 || closing.Sales.Total != 7000000 ||
+		closing.Note != "kurang seribu" || closing.ClosedByName != "Budi" || closing.PreviousActual != nil ||
+		closing.Shift.ClosedAt == nil || *closing.Shift.ClosedAt != "2026-10-05 14:30:00" {
+		t.Errorf("closing: %+v", closing)
+	}
+	if _, err := sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 1}); err == nil || !strings.Contains(err.Error(), "Buka shift") {
+		t.Errorf("sold after closing: %v", err)
+	}
+	// The same closing sent again, e.g. from another PC, is not a correction.
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, ActualCash: 56900000, Note: "kurang seribu"}); err == nil || !strings.Contains(err.Error(), "Muat ulang") {
+		t.Errorf("closed twice: %v", err)
+	}
+
+	// A correction needs a reason and becomes the closing that counts.
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, Revision: 1, ActualCash: 57000000}); err == nil || !strings.Contains(err.Error(), "Alasan koreksi") {
+		t.Errorf("correction without a reason: %v", err)
+	}
+	fixed := must(svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, Revision: 1, ActualCash: 57000000, Note: "salah hitung"}))
+	if fixed.Revision != 1 || fixed.Difference != 0 || fixed.PreviousActual == nil || *fixed.PreviousActual != 56900000 {
+		t.Errorf("correction: %+v", fixed)
+	}
+
+	// The counter is free again for the next cashier.
+	sore2 := must(svc.OpenShift(sitiToken, model.OpenShiftInput{DeviceID: testDevice, TypeID: sore.ID, OpeningCash: 20000000}))
+	must(sell(sitiToken, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 1})) // 10.000
+
+	// The closing keeps the sales as they were; a sale deleted later only
+	// marks the shift as changed.
+	must(0, svc.DeleteSale(admin, model.DeleteSaleInput{ID: first.ID, Reason: "salah input"}))
+	r := must(svc.GetShift(kasir, budi.ID))
+	if !r.Changed || r.Closing == nil || r.Closing.ID != fixed.ID || r.Closing.Sales.Total != 7000000 || r.Sales.Total != 5000000 ||
+		r.Sales.DeletedCount != 1 || len(r.History) != 2 || r.History[1].ID != closing.ID {
+		t.Errorf("changed shift: %+v", r)
+	}
+	if len(r.Deleted) != 1 || r.Deleted[0].ID != first.ID || r.Deleted[0].Reason != "salah input" || r.Deleted[0].DeletedByName != "Pak Admin" ||
+		len(r.Closing.Deleted) != 0 {
+		t.Errorf("deleted sales: shift %+v, closing %+v", r.Deleted, r.Closing.Deleted)
+	}
+
+	// Reprints are counted.
+	must(0, svc.RecordShiftClosingPrint(kasir, fixed.ID))
+	if r := must(svc.GetShift(kasir, budi.ID)); r.Closing.PrintCount != 1 || r.Closing.PreviousActual == nil {
+		t.Errorf("printed closing: %+v", r.Closing)
+	}
+	if err := svc.RecordShiftClosingPrint(sitiToken, fixed.ID); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("siti printed budi's closing: %v", err)
+	}
+
+	// A night shift crosses midnight and belongs to the day it started.
+	clk.t = time.Date(2026, 10, 5, 23, 30, 0, 0, time.Local)
+	if st := must(svc.ShiftStatus(kasir, "pc-2")); st.SuggestedTypeID != malam.ID || st.Own != nil || st.Blocking != nil {
+		t.Errorf("status at night: %+v", st)
+	}
+	night := must(svc.OpenShift(kasir, model.OpenShiftInput{DeviceID: "pc-2", TypeID: malam.ID, OpeningCash: 10000000}))
+	clk.t = time.Date(2026, 10, 6, 1, 30, 0, 0, time.Local)
+	must(sell(kasir, "pc-2", model.SaleItemInput{TicketID: topup.ID, Qty: 2})) // 100.000
+	if night.BusinessDate != "2026-10-05" || night.ScheduledEndAt != "2026-10-06 06:00:00" {
+		t.Errorf("night shift: %+v", night)
+	}
+
+	// The admin gets the shifts of a date and the ones left open on others.
+	day := must(svc.ShiftDay(admin, model.ShiftDayQuery{Date: "2026-10-05"}))
+	if len(day.Shifts) != 3 || day.Shifts[0].Shift.ID != budi.ID || day.Shifts[1].Shift.ID != sore2.ID || day.Shifts[2].Shift.ID != night.ID ||
+		day.Shifts[2].Sales.Total != 10000000 || day.Shifts[2].ExpectedCash != 20000000 || len(day.Unclosed) != 0 {
+		t.Errorf("admin day: %+v", day)
+	}
+	if next := must(svc.ShiftDay(admin, model.ShiftDayQuery{Date: "2026-10-06"})); len(next.Shifts) != 0 || len(next.Unclosed) != 2 {
+		t.Errorf("next day: %+v", next)
+	}
+	if _, err := svc.ShiftDay(admin, model.ShiftDayQuery{Date: "06-10-2026"}); err == nil {
+		t.Error("bad date accepted")
+	}
+
+	// A cashier gets their shifts open or closed today, whatever the date
+	// asked; yesterday's closing is out of reach, not for an admin.
+	mine := must(svc.ShiftDay(kasir, model.ShiftDayQuery{Date: "2026-01-01"}))
+	if mine.Date != "2026-10-06" || len(mine.Shifts) != 1 || mine.Shifts[0].Shift.ID != night.ID {
+		t.Errorf("kasir day: %+v", mine)
+	}
+	if _, err := svc.GetShift(kasir, budi.ID); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir read yesterday's shift: %v", err)
+	}
+	if _, err := svc.CloseShift(kasir, model.CloseShiftInput{ShiftID: budi.ID, Revision: 2, ActualCash: 1, Note: "x"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir corrected yesterday's shift: %v", err)
+	}
+	must(svc.GetShift(admin, budi.ID))
+
+	q := model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-06", ReportFilter: model.ReportFilter{ShiftTypeID: malam.ID}}
+	if r := must(svc.Report(admin, q)); r.Transactions != 1 || r.Total != 10000000 {
+		t.Errorf("report of the night shifts: %+v", r)
+	}
+
+	// A cashier with an open shift is only deleted once it is closed, here by
+	// an admin.
+	if err := svc.DeleteUser(admin, siti.ID); err == nil || !strings.Contains(err.Error(), "Sore") {
+		t.Errorf("deleted a cashier with an open shift: %v", err)
+	}
+	byAdmin := closeShift(t, svc, admin, sore2.ID)
+	if byAdmin.ClosedByName != "Pak Admin" || byAdmin.Shift.CashierName != "Siti" || byAdmin.ExpectedCash != 21000000 {
+		t.Errorf("closed by admin: %+v", byAdmin)
+	}
+	must(0, svc.DeleteUser(admin, siti.ID))
+}
+
+func TestSaleCorrection(t *testing.T) {
+	local, clk := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
+	useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")
+	sell := func(token, device string, items ...model.SaleItemInput) model.Sale {
+		return must(svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10}))
+	}
+	correct := func(token, device string, id int64, reason string, items ...model.SaleItemInput) (model.Sale, error) {
+		return svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10, ReplacesSaleID: id, Reason: reason})
+	}
+
+	budi := onShift(t, svc, admin, kasir, testDevice)
+	wrong := sell(kasir, testDevice, model.SaleItemInput{TicketID: entry.ID, Qty: 3}) // 30.000
+
+	// A cashier changes no sale, not even their own of the shift still open:
+	// lowering a sale after the customer left would take money unseen.
+	if _, err := correct(kasir, testDevice, wrong.ID, "salah jumlah", model.SaleItemInput{TicketID: entry.ID, Qty: 2}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir corrected a sale: %v", err)
+	}
+	if err := svc.DeleteSale(kasir, model.DeleteSaleInput{ID: wrong.ID, Reason: "batal"}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("kasir deleted a sale: %v", err)
+	}
+
+	// An admin corrects it from another PC without a shift of their own: while
+	// the cashier's shift is open the new sale goes into it, as the cashier's
+	// sale at that counter, since the money changes hands at that drawer.
+	if _, err := correct(admin, "pc-2", wrong.ID, " ", model.SaleItemInput{TicketID: entry.ID, Qty: 2}); err == nil || !strings.Contains(err.Error(), "Alasan koreksi") {
+		t.Errorf("correction without a reason: %v", err)
+	}
+	fixed := must(correct(admin, "pc-2", wrong.ID, " salah jumlah ", model.SaleItemInput{TicketID: entry.ID, Qty: 2}))
+	if fixed.ReplacesSaleID != wrong.ID || fixed.ReplacesInvoiceNo != wrong.InvoiceNo || fixed.Total != 2000000 || fixed.ShiftID != budi.ID ||
+		fixed.CashierName != "Budi" || fixed.CounterName != "LOKET 1" || !strings.HasPrefix(fixed.InvoiceNo, "TKT1") {
+		t.Errorf("correction: %+v", fixed)
+	}
+	old := must(svc.GetSale(kasir, wrong.ID))
+	if old.DeletedAt == nil || old.DeleteReason != "salah jumlah" || old.DeletedByName != "Pak Admin" || old.ReplacedByInvoiceNo != fixed.InvoiceNo {
+		t.Errorf("corrected sale: %+v", old)
+	}
+	if _, err := correct(admin, "pc-2", wrong.ID, "lagi", model.SaleItemInput{TicketID: entry.ID, Qty: 1}); err == nil || !strings.Contains(err.Error(), "sudah dihapus") {
+		t.Errorf("corrected twice: %v", err)
+	}
+	// The shift counts the new sale and lists the deleted one for review.
+	r := must(svc.GetShift(kasir, budi.ID))
+	if r.Sales.Total != 2000000 || r.Sales.Transactions != 1 || r.Sales.DeletedCount != 1 || r.Sales.DeletedTotal != 3000000 ||
+		len(r.Deleted) != 1 || r.Deleted[0].InvoiceNo != wrong.InvoiceNo || r.Deleted[0].Reason != "salah jumlah" ||
+		r.Deleted[0].DeletedByName != "Pak Admin" || r.Deleted[0].ReplacedByInvoiceNo != fixed.InvoiceNo {
+		t.Errorf("shift after the correction: %+v %+v", r.Sales, r.Deleted)
+	}
+
+	// An admin deletes a sale outright, also without a shift.
+	cancelled := sell(kasir, testDevice, model.SaleItemInput{TicketID: topup.ID, Qty: 1})
+	if err := svc.DeleteSale(admin, model.DeleteSaleInput{ID: cancelled.ID, Reason: " "}); err == nil {
+		t.Error("deleted without a reason")
+	}
+	must(0, svc.DeleteSale(admin, model.DeleteSaleInput{ID: cancelled.ID, Reason: "batal beli"}))
+
+	// Once the shift is closed, a correction goes into the admin's own shift
+	// at the PC it is made on, and the closed shift shows the change.
+	closing := closeShift(t, svc, kasir, budi.ID)
+	if len(closing.Deleted) != 0 {
+		t.Errorf("a closing saved by itself lists no deleted sales: %+v", closing.Deleted)
+	}
+	clk.t = clk.t.Add(time.Hour)
+	if _, err := correct(admin, "pc-2", fixed.ID, "harusnya plus topup", model.SaleItemInput{TicketID: entry.ID, Qty: 1}); err == nil || !strings.Contains(err.Error(), "Buka shift") {
+		t.Errorf("correction of a closed shift without a shift of one's own: %v", err)
+	}
+	mine := onShift(t, svc, admin, admin, "pc-2")
+	byAdmin := must(correct(admin, "pc-2", fixed.ID, "harusnya plus topup", model.SaleItemInput{TicketID: entry.ID, Qty: 2}, model.SaleItemInput{TicketID: topup.ID, Qty: 1}))
+	if byAdmin.ReplacesSaleID != fixed.ID || byAdmin.CashierName != "Pak Admin" || byAdmin.ShiftID != mine.ID || byAdmin.Total != 7000000 {
+		t.Errorf("correction by admin: %+v", byAdmin)
+	}
+	r = must(svc.GetShift(admin, budi.ID))
+	if !r.Changed || r.Sales.Total != 0 || r.Sales.DeletedCount != 3 || len(r.Deleted) != 3 {
+		t.Errorf("closed shift after the admin's correction: %+v", r)
+	}
+	// The closing keeps listing what was deleted by the time it was saved.
+	if len(r.Closing.Deleted) != 2 || r.Closing.Deleted[0].InvoiceNo != wrong.InvoiceNo || r.Closing.Deleted[1].InvoiceNo != cancelled.InvoiceNo {
+		t.Errorf("closing's deleted sales: %+v", r.Closing.Deleted)
+	}
+
+	// Corrections chain on: each version names the one before and after it,
+	// and only the last one counts.
+	last := must(correct(admin, "pc-2", byAdmin.ID, "salah lagi", model.SaleItemInput{TicketID: topup.ID, Qty: 2}))
+	if r := must(svc.GetShift(admin, mine.ID)); r.Sales.Transactions != 1 || r.Sales.Total != 10000000 || r.Sales.DeletedCount != 1 {
+		t.Errorf("admin's shift after the third correction: %+v", r.Sales)
+	}
+	day := model.SaleQuery{From: "2026-10-05", To: "2026-10-05"}
+	deleted := day
+	deleted.Deleted = true
+	byID := map[int64]model.Sale{}
+	for _, q := range []model.SaleQuery{day, deleted} {
+		for _, s := range must(svc.ListSales(admin, q)) {
+			byID[s.ID] = s
+		}
+	}
+	if byID[fixed.ID].ReplacedByInvoiceNo != byAdmin.InvoiceNo || byID[fixed.ID].ReplacesInvoiceNo != wrong.InvoiceNo ||
+		byID[byAdmin.ID].ReplacesInvoiceNo != fixed.InvoiceNo || byID[byAdmin.ID].ReplacedByInvoiceNo != last.InvoiceNo ||
+		byID[last.ID].ReplacesInvoiceNo != byAdmin.InvoiceNo || byID[last.ID].DeletedAt != nil || byID[cancelled.ID].ReplacedByInvoiceNo != "" {
+		t.Errorf("sale links: %+v", byID)
+	}
+	if r := must(svc.Report(admin, model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-05"})); r.Transactions != 1 || r.Total != 10000000 {
+		t.Errorf("report after three corrections: %d transaksi, total %d", r.Transactions, r.Total)
 	}
 }

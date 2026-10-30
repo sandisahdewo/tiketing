@@ -7,6 +7,8 @@
   import DateRangeInput from '../components/DateRangeInput.svelte'
   import Select from '../components/Select.svelte'
   import SortHeader from '../components/SortHeader.svelte'
+  import Modal from '../components/Modal.svelte'
+  import ShiftReportModal from '../components/ShiftReportModal.svelte'
   import { sortRows, type Sort } from '../lib/sort'
   import { FormState } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
@@ -15,6 +17,7 @@
   import { categories } from '../lib/colors'
   import { toast } from '../lib/toast.svelte'
   import { session, isAdmin } from '../lib/session.svelte'
+  import { refreshShift } from '../lib/shift.svelte'
 
   // Cashiers only get today's report of their own sales; the server enforces this too.
   const admin = isAdmin()
@@ -54,19 +57,21 @@
   let category = $state('')
   let cashierId = $state(0)
   let counterId = $state(0)
+  let shiftTypeId = $state(0)
   let filterChoices = $state<model.ReportFilters | null>(null)
-  let filtered = $derived(category !== '' || cashierId !== 0 || counterId !== 0)
+  let filtered = $derived(category !== '' || cashierId !== 0 || counterId !== 0 || shiftTypeId !== 0)
   // The filters of the report on screen; the transaction list follows them.
-  let appliedFilter = $state({ category: '', userId: 0, counterId: 0 })
+  let appliedFilter = $state({ category: '', userId: 0, counterId: 0, shiftTypeId: 0 })
 
   function filterQuery() {
-    return { category, userId: cashierId, counterId }
+    return { category, userId: cashierId, counterId, shiftTypeId }
   }
 
   function resetFilter() {
     category = ''
     cashierId = 0
     counterId = 0
+    shiftTypeId = 0
   }
 
   // Bumped on every "Tampilkan" so the transaction list reloads too.
@@ -165,11 +170,27 @@
     }
   }
 
+  // The shift report lists the shifts of one date for the admin (the date
+  // a shift belongs to), and the cashier's own shifts of today.
+  let shiftDay = $state<string | null>(null)
+  let shiftRangeAlert = $state(false)
+
+  function openShiftReport() {
+    if (!admin) {
+      shiftDay = today()
+    } else if (from !== to) {
+      shiftRangeAlert = true
+    } else {
+      shiftDay = from
+    }
+  }
+
   $effect(() => {
     period
     category
     cashierId
     counterId
+    shiftTypeId
     load()
   })
 
@@ -193,6 +214,7 @@
       {#if !admin}
         <button class="btn btn-secondary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Muat ulang'}</button>
       {/if}
+      <button class="btn btn-primary" onclick={openShiftReport}>Laporan Shift</button>
       <button class="btn btn-secondary" onclick={() => exportReport('pdf')} disabled={exporting !== null || !report}>{exporting === 'pdf' ? 'Menyiapkan…' : 'Cetak PDF'}</button>
       <button class="btn btn-secondary" onclick={() => exportReport('xlsx')} disabled={exporting !== null || !report}>{exporting === 'xlsx' ? 'Menyiapkan…' : 'Export Excel'}</button>
     </div>
@@ -226,6 +248,13 @@
         id="f-terminal"
         bind:value={counterId}
         options={[{ value: 0, label: 'Semua' }, ...(filterChoices?.counters ?? []).map((c) => ({ value: c.id, label: c.name + (c.active ? '' : ' (non-aktif)') }))]}
+      />
+    </Field>
+    <Field label="Shift" id="f-shift" class="w-28">
+      <Select
+        id="f-shift"
+        bind:value={shiftTypeId}
+        options={[{ value: 0, label: 'Semua' }, ...(filterChoices?.shiftTypes ?? []).map((t) => ({ value: t.id, label: t.name + (t.active ? '' : ' (non-aktif)') }))]}
       />
     </Field>
     {#if filtered}
@@ -374,3 +403,15 @@
   {/if}
 </div>
 
+{#if shiftDay}
+  <ShiftReportModal date={shiftDay} onclose={() => (shiftDay = null)} onchange={() => refreshShift().catch(() => {})} />
+{/if}
+
+{#if shiftRangeAlert}
+  <Modal title="Laporan Shift" onclose={() => (shiftRangeAlert = false)} width="max-w-md">
+    <p>Laporan shift dibuka per <b>satu tanggal</b>. Pilih satu tanggal di filter Tanggal, misalnya Hari ini atau Kemarin, lalu klik lagi.</p>
+    {#snippet footer()}
+      <button class="btn btn-primary" onclick={() => (shiftRangeAlert = false)}>OK</button>
+    {/snippet}
+  </Modal>
+{/if}

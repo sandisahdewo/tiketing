@@ -30,6 +30,16 @@ type Service interface {
 	Report(token string, q model.ReportQuery) (model.Report, error)
 	ReportFilters(token string) (model.ReportFilters, error)
 
+	ListShiftTypes(token string) ([]model.ShiftType, error)
+	SaveShiftType(token string, in model.ShiftTypeInput) (model.ShiftType, error)
+	SetShiftTypeActive(token string, id int64, active bool) error
+	ShiftStatus(token, deviceID string) (model.ShiftStatus, error)
+	OpenShift(token string, in model.OpenShiftInput) (model.Shift, error)
+	CloseShift(token string, in model.CloseShiftInput) (model.ShiftClosing, error)
+	GetShift(token string, id int64) (model.ShiftReport, error)
+	ShiftDay(token string, q model.ShiftDayQuery) (model.ShiftDay, error)
+	RecordShiftClosingPrint(token string, closingID int64) error
+
 	RecordPrint(token string, in model.PrintInput) error
 
 	ListCounters(token string) ([]model.Counter, error)

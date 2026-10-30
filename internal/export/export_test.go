@@ -29,7 +29,7 @@ func sample() Data {
 			Transactions: 3, Qty: 6, Total: 27000000, TicketQty: 4, TicketTotal: 14000000, TopupQty: 2, TopupTotal: 13000000,
 		},
 		Sales: []model.Sale{
-			{InvoiceNo: "TKT202610010001", CashierName: "Budi", Terminal: "LOKET 1", Total: 22000000, Paid: 22000000, CreatedAt: "2026-10-01 10:00:00"},
+			{InvoiceNo: "TKT202610010001", CashierName: "Budi", Terminal: "LOKET 1", ShiftName: "Siang", Total: 22000000, Paid: 22000000, CreatedAt: "2026-10-01 10:00:00"},
 			{InvoiceNo: "TKT202610020001", CashierName: "Budi", Terminal: "LOKET 1", Total: 5000000, Paid: 5000000, CreatedAt: "2026-10-02 11:00:00"},
 		},
 		PrintedBy: "Pak Admin",
@@ -58,6 +58,17 @@ func TestExcel(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("topup subtotal missing: %v", rows)
+	}
+	// The transaction list names each sale's shift; sales from before shifts have none.
+	rows, _ = f.GetRows("Transaksi")
+	var header, first, second []string
+	for i, r := range rows {
+		if len(r) > 1 && r[0] == "Waktu" && i+2 < len(rows) {
+			header, first, second = r, rows[i+1], rows[i+2]
+		}
+	}
+	if len(header) < 5 || header[4] != "Shift" || len(first) < 5 || first[4] != "Siang" || len(second) < 5 || second[4] != "-" {
+		t.Errorf("shift column: %v / %v / %v", header, first, second)
 	}
 	if dir := os.Getenv("EXPORT_SAMPLE_DIR"); dir != "" {
 		os.WriteFile(filepath.Join(dir, "sample.xlsx"), body, 0o644)

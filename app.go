@@ -616,6 +616,20 @@ func (a *App) CreateSale(items []model.SaleItemInput, paid int64) (model.Sale, e
 	return out, a.check(err)
 }
 
+// CorrectSale replaces the sale saleID with a new one made at this PC: the
+// old sale is deleted with the reason in the same step the new one is saved.
+func (a *App) CorrectSale(saleID int64, reason string, items []model.SaleItemInput, paid int64) (model.Sale, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.Sale{}, err
+	}
+	a.mu.Lock()
+	dev := a.cfg.DeviceID
+	a.mu.Unlock()
+	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid, ReplacesSaleID: saleID, Reason: reason})
+	return out, a.check(err)
+}
+
 func (a *App) GetSale(id int64) (model.Sale, error) {
 	svc, token, err := a.service()
 	if err != nil {
@@ -757,12 +771,15 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 	case model.CategoryTopup:
 		parts = append(parts, "Kategori: Topup Card")
 	}
+	if f.UserID == 0 && f.CounterID == 0 && f.ShiftTypeID == 0 {
+		return strings.Join(parts, " · "), nil
+	}
+	// Cashiers export their own report without filters, so this is an admin.
+	choices, err := svc.ReportFilters(token)
+	if err != nil {
+		return "", err
+	}
 	if f.UserID > 0 {
-		// Cashiers export their own report without filters, so this is an admin.
-		choices, err := svc.ReportFilters(token)
-		if err != nil {
-			return "", err
-		}
 		name := fmt.Sprintf("#%d", f.UserID)
 		for _, c := range choices.Cashiers {
 			if c.ID == f.UserID {
@@ -772,10 +789,6 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 		parts = append(parts, "Kasir: "+name)
 	}
 	if f.CounterID > 0 {
-		choices, err := svc.ReportFilters(token)
-		if err != nil {
-			return "", err
-		}
 		name := fmt.Sprintf("#%d", f.CounterID)
 		for _, c := range choices.Counters {
 			if c.ID == f.CounterID {
@@ -783,6 +796,15 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 			}
 		}
 		parts = append(parts, "Loket: "+name)
+	}
+	if f.ShiftTypeID > 0 {
+		name := fmt.Sprintf("#%d", f.ShiftTypeID)
+		for _, t := range choices.ShiftTypes {
+			if t.ID == f.ShiftTypeID {
+				name = t.Name
+			}
+		}
+		parts = append(parts, "Shift: "+name)
 	}
 	return strings.Join(parts, " · "), nil
 }
@@ -879,6 +901,9 @@ func trialRun(path string, info db.BackupInfo) error {
 		return err
 	}
 	if _, err := st.GetSettings(); err != nil {
+		return err
+	}
+	if _, err := st.ShiftsOfDay(day); err != nil {
 		return err
 	}
 	_, err = st.ReportFilters()
@@ -1140,9 +1165,9 @@ func (a *App) printBytes(data []byte) (string, error) {
 		return "", fmt.Errorf("Gagal mencetak ke %s: %w", name, err)
 	}
 	if path != "" {
-		return "Nota disimpan ke " + path, nil
+		return "Disimpan ke " + path, nil
 	}
-	return "Nota dikirim ke " + name, nil
+	return "Dikirim ke printer " + name, nil
 }
 
 func (a *App) PrintReceipt(saleID int64) (msg string, err error) {
@@ -1172,6 +1197,185 @@ func (a *App) PrintReceipt(saleID int64) (msg string, err error) {
 		return msg, a.check(fmt.Errorf("Nota tercetak, tapi gagal mencatat cetakan: %w", err))
 	}
 	return msg, nil
+}
+
+// ListShiftTypes lists every shift type (admin).
+func (a *App) ListShiftTypes() ([]model.ShiftType, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return nil, err
+	}
+	out, err := svc.ListShiftTypes(token)
+	return out, a.check(err)
+}
+
+func (a *App) SaveShiftType(in model.ShiftTypeInput) (model.ShiftType, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ShiftType{}, err
+	}
+	out, err := svc.SaveShiftType(token, in)
+	return out, a.check(err)
+}
+
+func (a *App) SetShiftTypeActive(id int64, active bool) error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	return a.check(svc.SetShiftTypeActive(token, id, active))
+}
+
+// ShiftStatus tells the cashier screen whether this PC's user can sell, or
+// what to do first.
+func (a *App) ShiftStatus() (model.ShiftStatus, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ShiftStatus{}, err
+	}
+	a.mu.Lock()
+	dev := a.cfg.DeviceID
+	a.mu.Unlock()
+	out, err := svc.ShiftStatus(token, dev)
+	return out, a.check(err)
+}
+
+// OpenShift opens a shift at this PC's counter with the cash in the drawer.
+func (a *App) OpenShift(typeID, openingCash int64) (model.Shift, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.Shift{}, err
+	}
+	a.mu.Lock()
+	dev := a.cfg.DeviceID
+	a.mu.Unlock()
+	out, err := svc.OpenShift(token, model.OpenShiftInput{DeviceID: dev, TypeID: typeID, OpeningCash: openingCash})
+	return out, a.check(err)
+}
+
+// CloseShift saves the cash counted at the end of a shift, or a correction
+// of it; print it with PrintShiftClosing.
+func (a *App) CloseShift(in model.CloseShiftInput) (model.ShiftClosing, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ShiftClosing{}, err
+	}
+	out, err := svc.CloseShift(token, in)
+	return out, a.check(err)
+}
+
+func (a *App) GetShift(id int64) (model.ShiftReport, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ShiftReport{}, err
+	}
+	out, err := svc.GetShift(token, id)
+	return out, a.check(err)
+}
+
+// ShiftDay lists the shifts of a business date (admin), or the cashier's own
+// shifts of today.
+func (a *App) ShiftDay(date string) (model.ShiftDay, error) {
+	svc, token, err := a.service()
+	if err != nil {
+		return model.ShiftDay{}, err
+	}
+	out, err := svc.ShiftDay(token, model.ShiftDayQuery{Date: date})
+	return out, a.check(err)
+}
+
+// printSetup is what every printout needs: the business details and logo.
+func (a *App) printSetup(op string) (model.Settings, *receipt.Bitmap, error) {
+	svc, token, err := a.serviceOp(op)
+	if err != nil {
+		return model.Settings{}, nil, err
+	}
+	st, err := svc.GetSettings(token)
+	if err != nil {
+		return st, nil, a.check(err)
+	}
+	logo, err := a.logo(op, st)
+	if err != nil {
+		return st, nil, fmt.Errorf("Gagal memuat logo: %w", err)
+	}
+	return st, logo, nil
+}
+
+// ShiftClosingPreview shows how a closing prints, also one not saved yet
+// (the screen fills it in while the cash is being typed).
+func (a *App) ShiftClosingPreview(c model.ShiftClosing) (ReceiptView, error) {
+	st, logo, err := a.printSetup(applog.NewOpID())
+	if err != nil {
+		return ReceiptView{}, err
+	}
+	return ReceiptView{Lines: receipt.ShiftClosing(st, c, a.paperWidth(), time.Now()), Logo: logoDataURL(logo), PrintCount: c.PrintCount}, nil
+}
+
+// PrintShiftClosing prints the closing that counts (the latest revision) of
+// a closed shift.
+func (a *App) PrintShiftClosing(shiftID int64) (msg string, err error) {
+	op := applog.NewOpID()
+	var closingID int64
+	defer func() { a.record(op, "PrintShiftClosing", err, "shift", shiftID, "closing", closingID, "result", msg) }()
+	svc, token, err := a.serviceOp(op)
+	if err != nil {
+		return "", err
+	}
+	r, err := svc.GetShift(token, shiftID)
+	if err != nil {
+		return "", a.check(err)
+	}
+	if r.Closing == nil {
+		return "", model.Invalid("Shift ini belum ditutup")
+	}
+	closingID = r.Closing.ID
+	st, logo, err := a.printSetup(op)
+	if err != nil {
+		return "", err
+	}
+	msg, err = a.printBytes(receipt.ESCPOS(receipt.ShiftClosing(st, *r.Closing, a.paperWidth(), time.Now()), logo))
+	if err != nil {
+		return "", err
+	}
+	if err := svc.RecordShiftClosingPrint(token, closingID); err != nil {
+		return msg, a.check(fmt.Errorf("Laporan tercetak, tapi gagal mencatat cetakan: %w", err))
+	}
+	return msg, nil
+}
+
+func (a *App) shiftDayLines(op, date string) ([]receipt.Line, *receipt.Bitmap, error) {
+	svc, token, err := a.serviceOp(op)
+	if err != nil {
+		return nil, nil, err
+	}
+	day, err := svc.ShiftDay(token, model.ShiftDayQuery{Date: date})
+	if err != nil {
+		return nil, nil, a.check(err)
+	}
+	st, logo, err := a.printSetup(op)
+	if err != nil {
+		return nil, nil, err
+	}
+	return receipt.ShiftDay(st, day, a.paperWidth(), time.Now()), logo, nil
+}
+
+// ShiftDayPreview shows the summary of every shift of a business date.
+func (a *App) ShiftDayPreview(date string) (ReceiptView, error) {
+	lines, logo, err := a.shiftDayLines(applog.NewOpID(), date)
+	if err != nil {
+		return ReceiptView{}, err
+	}
+	return ReceiptView{Lines: lines, Logo: logoDataURL(logo)}, nil
+}
+
+func (a *App) PrintShiftDay(date string) (msg string, err error) {
+	op := applog.NewOpID()
+	defer func() { a.record(op, "PrintShiftDay", err, "date", date, "result", msg) }()
+	lines, logo, err := a.shiftDayLines(op, date)
+	if err != nil {
+		return "", err
+	}
+	return a.printBytes(receipt.ESCPOS(lines, logo))
 }
 
 func (a *App) PrintTest() (msg string, err error) {

@@ -103,6 +103,24 @@ export namespace main {
 
 export namespace model {
 	
+	export class CloseShiftInput {
+	    shiftId: number;
+	    revision: number;
+	    actualCash: number;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CloseShiftInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.shiftId = source["shiftId"];
+	        this.revision = source["revision"];
+	        this.actualCash = source["actualCash"];
+	        this.note = source["note"];
+	    }
+	}
 	export class Counter {
 	    id: number;
 	    name: string;
@@ -145,6 +163,32 @@ export namespace model {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.invoiceCode = source["invoiceCode"];
+	    }
+	}
+	export class DeletedSale {
+	    id: number;
+	    invoiceNo: string;
+	    total: number;
+	    createdAt: string;
+	    deletedAt: string;
+	    deletedByName: string;
+	    reason: string;
+	    replacedByInvoiceNo: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletedSale(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.invoiceNo = source["invoiceNo"];
+	        this.total = source["total"];
+	        this.createdAt = source["createdAt"];
+	        this.deletedAt = source["deletedAt"];
+	        this.deletedByName = source["deletedByName"];
+	        this.reason = source["reason"];
+	        this.replacedByInvoiceNo = source["replacedByInvoiceNo"];
 	    }
 	}
 	export class ReportTicketRow {
@@ -261,9 +305,34 @@ export namespace model {
 	        this.deleted = source["deleted"];
 	    }
 	}
+	export class ShiftType {
+	    id: number;
+	    name: string;
+	    startTime: string;
+	    endTime: string;
+	    active: boolean;
+	    createdAt: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftType(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.active = source["active"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class ReportFilters {
 	    cashiers: ReportCashier[];
 	    counters: Counter[];
+	    shiftTypes: ShiftType[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportFilters(source);
@@ -273,6 +342,7 @@ export namespace model {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cashiers = this.convertValues(source["cashiers"], ReportCashier);
 	        this.counters = this.convertValues(source["counters"], Counter);
+	        this.shiftTypes = this.convertValues(source["shiftTypes"], ShiftType);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -300,6 +370,7 @@ export namespace model {
 	    category: string;
 	    userId: number;
 	    counterId: number;
+	    shiftTypeId: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReportQuery(source);
@@ -313,6 +384,7 @@ export namespace model {
 	        this.category = source["category"];
 	        this.userId = source["userId"];
 	        this.counterId = source["counterId"];
+	        this.shiftTypeId = source["shiftTypeId"];
 	    }
 	}
 	
@@ -349,6 +421,7 @@ export namespace model {
 	    terminal: string;
 	    counterId: number;
 	    counterName: string;
+	    shiftName: string;
 	    total: number;
 	    paid: number;
 	    changeAmount: number;
@@ -358,6 +431,10 @@ export namespace model {
 	    deletedAt?: string;
 	    deletedByName: string;
 	    deleteReason: string;
+	    shiftId: number;
+	    replacesSaleId: number;
+	    replacesInvoiceNo: string;
+	    replacedByInvoiceNo: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Sale(source);
@@ -372,6 +449,7 @@ export namespace model {
 	        this.terminal = source["terminal"];
 	        this.counterId = source["counterId"];
 	        this.counterName = source["counterName"];
+	        this.shiftName = source["shiftName"];
 	        this.total = source["total"];
 	        this.paid = source["paid"];
 	        this.changeAmount = source["changeAmount"];
@@ -381,6 +459,10 @@ export namespace model {
 	        this.deletedAt = source["deletedAt"];
 	        this.deletedByName = source["deletedByName"];
 	        this.deleteReason = source["deleteReason"];
+	        this.shiftId = source["shiftId"];
+	        this.replacesSaleId = source["replacesSaleId"];
+	        this.replacesInvoiceNo = source["replacesInvoiceNo"];
+	        this.replacedByInvoiceNo = source["replacedByInvoiceNo"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -462,6 +544,7 @@ export namespace model {
 	    category: string;
 	    userId: number;
 	    counterId: number;
+	    shiftTypeId: number;
 	    page: number;
 	    pageSize: number;
 	    sort: string;
@@ -480,6 +563,7 @@ export namespace model {
 	        this.category = source["category"];
 	        this.userId = source["userId"];
 	        this.counterId = source["counterId"];
+	        this.shiftTypeId = source["shiftTypeId"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	        this.sort = source["sort"];
@@ -494,6 +578,7 @@ export namespace model {
 	    category: string;
 	    userId: number;
 	    counterId: number;
+	    shiftTypeId: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleQuery(source);
@@ -508,6 +593,7 @@ export namespace model {
 	        this.category = source["category"];
 	        this.userId = source["userId"];
 	        this.counterId = source["counterId"];
+	        this.shiftTypeId = source["shiftTypeId"];
 	    }
 	}
 	export class Settings {
@@ -532,6 +618,267 @@ export namespace model {
 	        this.purposeWeekday = source["purposeWeekday"];
 	        this.purposeWeekend = source["purposeWeekend"];
 	        this.hasLogo = source["hasLogo"];
+	    }
+	}
+	export class Shift {
+	    id: number;
+	    typeId: number;
+	    name: string;
+	    startTime: string;
+	    endTime: string;
+	    businessDate: string;
+	    scheduledEndAt: string;
+	    userId: number;
+	    cashierName: string;
+	    counterId: number;
+	    counterName: string;
+	    openingCash: number;
+	    openedAt: string;
+	    closedAt?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Shift(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.typeId = source["typeId"];
+	        this.name = source["name"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.businessDate = source["businessDate"];
+	        this.scheduledEndAt = source["scheduledEndAt"];
+	        this.userId = source["userId"];
+	        this.cashierName = source["cashierName"];
+	        this.counterId = source["counterId"];
+	        this.counterName = source["counterName"];
+	        this.openingCash = source["openingCash"];
+	        this.openedAt = source["openedAt"];
+	        this.closedAt = source["closedAt"];
+	    }
+	}
+	export class ShiftSales {
+	    transactions: number;
+	    ticketQty: number;
+	    ticketTotal: number;
+	    topupQty: number;
+	    topupTotal: number;
+	    total: number;
+	    firstSaleAt: string;
+	    lastSaleAt: string;
+	    deletedCount: number;
+	    deletedTotal: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftSales(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.transactions = source["transactions"];
+	        this.ticketQty = source["ticketQty"];
+	        this.ticketTotal = source["ticketTotal"];
+	        this.topupQty = source["topupQty"];
+	        this.topupTotal = source["topupTotal"];
+	        this.total = source["total"];
+	        this.firstSaleAt = source["firstSaleAt"];
+	        this.lastSaleAt = source["lastSaleAt"];
+	        this.deletedCount = source["deletedCount"];
+	        this.deletedTotal = source["deletedTotal"];
+	    }
+	}
+	export class ShiftClosing {
+	    id: number;
+	    shift: Shift;
+	    revision: number;
+	    sales: ShiftSales;
+	    expectedCash: number;
+	    actualCash: number;
+	    difference: number;
+	    note: string;
+	    closedByName: string;
+	    closedAt: string;
+	    printCount: number;
+	    previousActual?: number;
+	    deleted: DeletedSale[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftClosing(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.shift = this.convertValues(source["shift"], Shift);
+	        this.revision = source["revision"];
+	        this.sales = this.convertValues(source["sales"], ShiftSales);
+	        this.expectedCash = source["expectedCash"];
+	        this.actualCash = source["actualCash"];
+	        this.difference = source["difference"];
+	        this.note = source["note"];
+	        this.closedByName = source["closedByName"];
+	        this.closedAt = source["closedAt"];
+	        this.printCount = source["printCount"];
+	        this.previousActual = source["previousActual"];
+	        this.deleted = this.convertValues(source["deleted"], DeletedSale);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ShiftReport {
+	    shift: Shift;
+	    sales: ShiftSales;
+	    expectedCash: number;
+	    deleted: DeletedSale[];
+	    closing?: ShiftClosing;
+	    history: ShiftClosing[];
+	    changed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.shift = this.convertValues(source["shift"], Shift);
+	        this.sales = this.convertValues(source["sales"], ShiftSales);
+	        this.expectedCash = source["expectedCash"];
+	        this.deleted = this.convertValues(source["deleted"], DeletedSale);
+	        this.closing = this.convertValues(source["closing"], ShiftClosing);
+	        this.history = this.convertValues(source["history"], ShiftClosing);
+	        this.changed = source["changed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ShiftDay {
+	    date: string;
+	    shifts: ShiftReport[];
+	    unclosed: Shift[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftDay(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.shifts = this.convertValues(source["shifts"], ShiftReport);
+	        this.unclosed = this.convertValues(source["unclosed"], Shift);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class ShiftStatus {
+	    counterId: number;
+	    counterName: string;
+	    own?: ShiftReport;
+	    blocking?: Shift;
+	    types: ShiftType[];
+	    suggestedTypeId: number;
+	    serverTime: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.counterId = source["counterId"];
+	        this.counterName = source["counterName"];
+	        this.own = this.convertValues(source["own"], ShiftReport);
+	        this.blocking = this.convertValues(source["blocking"], Shift);
+	        this.types = this.convertValues(source["types"], ShiftType);
+	        this.suggestedTypeId = source["suggestedTypeId"];
+	        this.serverTime = source["serverTime"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class ShiftTypeInput {
+	    id: number;
+	    name: string;
+	    startTime: string;
+	    endTime: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShiftTypeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
 	    }
 	}
 	export class Status {

@@ -3,11 +3,13 @@
 Aplikasi desktop penjualan tiket untuk Windows: **Go + Wails v2 + SQLite + Svelte 5 + Tailwind v4**.
 
 Fitur:
-- **Kasir (POS):** pilih tiket dari grid atau cari, qty bisa lebih dari 1, bayar tunai, lalu nota tampil dan bisa dicetak ke printer thermal (ESC/POS, 58/80 mm).
+- **Kasir (POS):** pilih tiket dari grid atau cari, qty bisa lebih dari 1, bayar tunai, lalu nota langsung dicetak ke printer thermal (ESC/POS, 58/80 mm) dan tampil di layar untuk cetak ulang.
+- **Shift:** kasir wajib buka shift (pilih shift + isi modal awal) sebelum bertransaksi. Tutup shift menghitung kas seharusnya (modal awal + penjualan) terhadap kas aktual, lalu mencetak Laporan Shift. Jenis shift (Siang/Sore/Malam beserta jamnya) diatur admin di menu Shift.
+- **Koreksi nota (admin):** nota yang salah dibatalkan dengan alasan, lalu itemnya masuk keranjang untuk dibayar ulang sebagai nota pengganti. Hapus dan koreksi nota hanya bisa dilakukan admin. Semua nota yang dihapus tercantum di Laporan Shift, di layar maupun cetakan.
 - **Nota:** logo (bitmap) atau nama usaha, No/Date/Time In/Purpose/Cashier, label **Reprint N** untuk cetak ulang (setiap cetakan dicatat di `sale_prints`).
 - **Tiket (admin):** tambah, ubah, hapus (soft delete), dan pulihkan.
 - **Pengguna (admin):** role `admin` (semua menu) dan `kasir` (hanya penjualan).
-- **Laporan (admin):** harian, mingguan (Senin–Minggu), bulanan, per tiket, dan daftar transaksi dengan cetak ulang nota.
+- **Laporan (admin):** harian, mingguan (Senin–Minggu), bulanan, per tiket, dan daftar transaksi dengan cetak ulang nota. Bisa difilter per kategori, kasir, loket, dan shift. Laporan Shift berisi semua shift dalam satu tanggal, beserta ringkasan yang bisa dicetak.
 - **Server/Client:** satu PC menyimpan database, PC lain terhubung lewat LAN.
 - **Self-update:** cek update dari GitHub Releases, dengan file yang ditandatangani ed25519.
 
@@ -38,6 +40,17 @@ Format: `{PREFIX}{KODE}{YYYYMMDD}{URUT 4 digit}`, contohnya `PNY25202610090003`.
 - **Prefix** (misalnya `PNY`) diatur admin di Pengaturan dan berlaku untuk semua PC.
 - **Kode** (misalnya `25`, maksimal 4 karakter) diatur per PC di Pengaturan, dan boleh kosong.
 - Nomor urut mulai lagi dari 0001 setiap hari, dihitung per kombinasi prefix + kode.
+
+### Shift
+
+- Satu loket hanya boleh punya satu shift terbuka, dan satu kasir juga hanya satu. Kasir lain di PC itu baru bisa buka shift setelah shift lama ditutup oleh pemiliknya atau admin, supaya uang di laci tidak tercampur.
+- Transaksi hanya bisa dilakukan di loket tempat shift dibuka. Admin yang berjualan juga wajib buka shift.
+- Logout atau restart server tidak menutup shift. Setelah jam selesai lewat, aplikasi hanya menyarankan tutup shift dan tidak pernah menutupnya paksa.
+- Shift yang jam selesainya lebih kecil dari jam mulai (misalnya Malam 22:00–06:00) berakhir keesokan harinya. Tanggal shift ikut tanggal mulainya, jadi Malam yang dibuka pukul 00:30 masih termasuk tanggal sebelumnya. Laporan Penjualan tetap dihitung per tanggal transaksi.
+- **Tutup shift** menyimpan potret penjualan saat itu. Keterangan wajib diisi kalau kas aktual berbeda dari kas seharusnya.
+- **Koreksi tutup shift** membuat revisi baru yang wajib diberi alasan. Kalau ada nota yang dihapus setelah shift ditutup, shift ditandai "Berubah".
+- Nama dan jam disalin ke shift saat dibuka. Mengubah jenis shift hanya berlaku untuk shift berikutnya.
+- Nota pengganti dari koreksi nota dicatat di shift nota asli selama shift itu masih terbuka, atas nama kasir dan loket shift tersebut, karena uangnya keluar-masuk di laci itu. Kalau shift itu sudah ditutup, nota pengganti masuk ke shift admin yang mengoreksi.
 
 ### Purpose
 

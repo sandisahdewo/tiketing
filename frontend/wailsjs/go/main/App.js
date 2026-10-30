@@ -26,6 +26,14 @@ export function ChooseRestoreFile() {
   return window['go']['main']['App']['ChooseRestoreFile']();
 }
 
+export function CloseShift(arg1) {
+  return window['go']['main']['App']['CloseShift'](arg1);
+}
+
+export function CorrectSale(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CorrectSale'](arg1, arg2, arg3, arg4);
+}
+
 export function CreateFirstAdmin(arg1) {
   return window['go']['main']['App']['CreateFirstAdmin'](arg1);
 }
@@ -70,6 +78,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function GetShift(arg1) {
+  return window['go']['main']['App']['GetShift'](arg1);
+}
+
 export function ListCounters() {
   return window['go']['main']['App']['ListCounters']();
 }
@@ -80,6 +92,10 @@ export function ListPrinters() {
 
 export function ListSales(arg1) {
   return window['go']['main']['App']['ListSales'](arg1);
+}
+
+export function ListShiftTypes() {
+  return window['go']['main']['App']['ListShiftTypes']();
 }
 
 export function ListTickets(arg1, arg2, arg3) {
@@ -106,8 +122,20 @@ export function MyCounter() {
   return window['go']['main']['App']['MyCounter']();
 }
 
+export function OpenShift(arg1, arg2) {
+  return window['go']['main']['App']['OpenShift'](arg1, arg2);
+}
+
 export function PrintReceipt(arg1) {
   return window['go']['main']['App']['PrintReceipt'](arg1);
+}
+
+export function PrintShiftClosing(arg1) {
+  return window['go']['main']['App']['PrintShiftClosing'](arg1);
+}
+
+export function PrintShiftDay(arg1) {
+  return window['go']['main']['App']['PrintShiftDay'](arg1);
 }
 
 export function PrintTest() {
@@ -158,6 +186,10 @@ export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
+export function SaveShiftType(arg1) {
+  return window['go']['main']['App']['SaveShiftType'](arg1);
+}
+
 export function SaveTicket(arg1) {
   return window['go']['main']['App']['SaveTicket'](arg1);
 }
@@ -178,6 +210,10 @@ export function SetCounterActive(arg1, arg2) {
   return window['go']['main']['App']['SetCounterActive'](arg1, arg2);
 }
 
+export function SetShiftTypeActive(arg1, arg2) {
+  return window['go']['main']['App']['SetShiftTypeActive'](arg1, arg2);
+}
+
 export function SetTicketActive(arg1, arg2) {
   return window['go']['main']['App']['SetTicketActive'](arg1, arg2);
 }
@@ -188,6 +224,22 @@ export function SetupClient(arg1) {
 
 export function SetupServer(arg1) {
   return window['go']['main']['App']['SetupServer'](arg1);
+}
+
+export function ShiftClosingPreview(arg1) {
+  return window['go']['main']['App']['ShiftClosingPreview'](arg1);
+}
+
+export function ShiftDay(arg1) {
+  return window['go']['main']['App']['ShiftDay'](arg1);
+}
+
+export function ShiftDayPreview(arg1) {
+  return window['go']['main']['App']['ShiftDayPreview'](arg1);
+}
+
+export function ShiftStatus() {
+  return window['go']['main']['App']['ShiftStatus']();
 }
 
 export function Status() {

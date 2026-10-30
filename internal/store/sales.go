@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,39 +11,62 @@ import (
 	"tiket/internal/model"
 )
 
-const saleColumns = `s.id, s.invoice_no, s.user_id, u.full_name, s.terminal, s.counter_id, c.name, s.total, s.paid, s.change_amount, s.created_at,
-	(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id), s.deleted_at, COALESCE(d.full_name, ''), s.delete_reason`
+const saleColumns = `s.id, s.invoice_no, s.user_id, u.full_name, s.terminal, s.counter_id, c.name, COALESCE(sh.name, ''), s.total, s.paid, s.change_amount, s.created_at,
+	(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id), s.deleted_at, COALESCE(d.full_name, ''), s.delete_reason,
+	COALESCE(s.shift_id, 0), COALESCE(s.replaces_sale_id, 0), COALESCE(r.invoice_no, ''),
+	COALESCE((SELECT n.invoice_no FROM sales n WHERE n.replaces_sale_id = s.id), '')`
 
-const saleFrom = " FROM sales s JOIN users u ON u.id = s.user_id LEFT JOIN users d ON d.id = s.deleted_by JOIN counters c ON c.id = s.counter_id"
+const saleFrom = " FROM sales s JOIN users u ON u.id = s.user_id LEFT JOIN users d ON d.id = s.deleted_by JOIN counters c ON c.id = s.counter_id" +
+	" LEFT JOIN shifts sh ON sh.id = s.shift_id LEFT JOIN sales r ON r.id = s.replaces_sale_id"
 
 func scanSale(row interface{ Scan(...any) error }) (model.Sale, error) {
 	var s model.Sale
-	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.CounterID, &s.CounterName, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount,
-		&s.DeletedAt, &s.DeletedByName, &s.DeleteReason)
+	err := row.Scan(&s.ID, &s.InvoiceNo, &s.UserID, &s.CashierName, &s.Terminal, &s.CounterID, &s.CounterName, &s.ShiftName, &s.Total, &s.Paid, &s.ChangeAmount, &s.CreatedAt, &s.PrintCount,
+		&s.DeletedAt, &s.DeletedByName, &s.DeleteReason, &s.ShiftID, &s.ReplacesSaleID, &s.ReplacesInvoiceNo, &s.ReplacedByInvoiceNo)
 	s.Items = []model.SaleItem{}
 	return s, err
 }
 
-// CreateSale records a sale made on the PC deviceID, at that PC's counter.
-func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItemInput, paid int64) (model.Sale, error) {
+// CreateSale records a sale made on the PC deviceID, at that PC's counter, in
+// the user's shift open there. A replaces > 0 makes it the correction of that
+// sale, which userID deletes with reason in the same transaction. While the
+// corrected sale's shift is open the correction goes into it, as a sale of
+// that shift's cashier at its counter: the money changes hands at that drawer.
+func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItemInput, paid, replaces int64, reason string) (model.Sale, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return model.Sale{}, err
 	}
 	defer tx.Rollback()
 
-	var counterID int64
-	var terminal, invoiceCode string
-	var active bool
-	err = tx.QueryRow("SELECT id, name, invoice_code, active FROM counters WHERE device_id = ?", deviceID).Scan(&counterID, &terminal, &invoiceCode, &active)
-	if err == sql.ErrNoRows || deviceID == "" {
-		return model.Sale{}, model.Invalid("Komputer ini belum punya loket. Minta admin memilih loket di Pengaturan.")
-	}
+	shift, err := correctedShift(tx, replaces)
 	if err != nil {
 		return model.Sale{}, err
 	}
-	if !active {
-		return model.Sale{}, model.Invalid("Loket " + terminal + " sedang non-aktif")
+	seller := userID
+	var counterID int64
+	var terminal, invoiceCode string
+	if shift != nil {
+		seller = shift.UserID
+		err = tx.QueryRow("SELECT id, name, invoice_code FROM counters WHERE id = ?", shift.CounterID).Scan(&counterID, &terminal, &invoiceCode)
+		if err != nil {
+			return model.Sale{}, err
+		}
+	} else {
+		counterID, terminal, invoiceCode, err = deviceCounter(tx, deviceID)
+		if err != nil {
+			return model.Sale{}, err
+		}
+		shift, err = openShift(tx, "h.user_id = ?", userID)
+		if err != nil {
+			return model.Sale{}, err
+		}
+		if shift == nil {
+			return model.Sale{}, model.Invalid("Buka shift dulu sebelum bertransaksi.")
+		}
+		if shift.CounterID != counterID {
+			return model.Sale{}, model.Invalid(fmt.Sprintf("Shift Anda masih terbuka di %s. Tutup shift itu dulu sebelum bertransaksi di %s.", shift.CounterName, terminal))
+		}
 	}
 
 	type line struct {
@@ -81,10 +105,24 @@ func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItem
 	if err != nil {
 		return model.Sale{}, err
 	}
+	var replaced any
+	if replaces > 0 {
+		res, err := tx.Exec(
+			"UPDATE sales SET deleted_at = ?, deleted_by = ?, delete_reason = ? WHERE id = ? AND deleted_at IS NULL",
+			now.Format(timeLayout), userID, reason, replaces,
+		)
+		if err := affected(res, err); err != nil {
+			if errors.Is(err, model.ErrNotFound) {
+				return model.Sale{}, model.Invalid("Nota yang dikoreksi sudah dihapus")
+			}
+			return model.Sale{}, err
+		}
+		replaced = replaces
+	}
 	res, err := tx.Exec(
-		`INSERT INTO sales (invoice_no, user_id, terminal, counter_id, total, paid, change_amount, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		invoice, userID, terminal, counterID, total, paid, paid-total, now.Format(timeLayout),
+		`INSERT INTO sales (invoice_no, user_id, terminal, counter_id, shift_id, replaces_sale_id, total, paid, change_amount, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		invoice, seller, terminal, counterID, shift.ID, replaced, total, paid, paid-total, now.Format(timeLayout),
 	)
 	if err != nil {
 		return model.Sale{}, err
@@ -103,6 +141,23 @@ func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItem
 		return model.Sale{}, err
 	}
 	return s.GetSale(saleID)
+}
+
+// correctedShift is the open shift of the sale a correction replaces; nil
+// when that shift is closed, the sale had none, or this is no correction.
+func correctedShift(q dbtx, saleID int64) (*model.Shift, error) {
+	if saleID <= 0 {
+		return nil, nil
+	}
+	var shiftID sql.NullInt64
+	err := q.QueryRow("SELECT shift_id FROM sales WHERE id = ?", saleID).Scan(&shiftID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !shiftID.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return openShift(q, "h.id = ?", shiftID.Int64)
 }
 
 func nextInvoice(tx *sql.Tx, base string, now time.Time) (string, error) {
@@ -210,6 +265,10 @@ func salesFilter(q model.SaleQuery, userID int64) (string, []any, error) {
 		where += " AND EXISTS (SELECT 1 FROM sale_items ci JOIN tickets ct ON ct.id = ci.ticket_id WHERE ci.sale_id = s.id AND ct.category = ?)"
 		args = append(args, q.Category)
 	}
+	if q.ShiftTypeID > 0 {
+		where += " AND s.shift_id IN (SELECT id FROM shifts WHERE type_id = ?)"
+		args = append(args, q.ShiftTypeID)
+	}
 	if search := strings.TrimSpace(q.Search); search != "" {
 		where += ` AND (s.invoice_no LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\' OR c.name LIKE ? ESCAPE '\'
 			OR EXISTS (SELECT 1 FROM sale_items i JOIN tickets t ON t.id = i.ticket_id WHERE i.sale_id = s.id AND t.name LIKE ? ESCAPE '\'))`
@@ -255,6 +314,7 @@ var saleSort = map[string]string{
 	"invoice":  "s.invoice_no",
 	"cashier":  "u.full_name COLLATE NOCASE",
 	"terminal": "c.name COLLATE NOCASE",
+	"shift":    "sh.name COLLATE NOCASE",
 	"total":    "s.total",
 	"prints":   "(SELECT COUNT(*) FROM sale_prints p WHERE p.sale_id = s.id)",
 }

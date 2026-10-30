@@ -52,6 +52,14 @@ func TestRestoreDatabase(t *testing.T) {
 		return info.Sales
 	}
 
+	// Sales need an open shift; the backup below keeps it open.
+	st, err := a.ShiftStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.OpenShift(st.SuggestedTypeID, 0); err != nil {
+		t.Fatal(err)
+	}
 	sell()
 	backup := filepath.Join(dir, "backup.db")
 	if err := db.BackupTo(a.conn, backup); err != nil {

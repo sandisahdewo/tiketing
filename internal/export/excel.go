@@ -204,18 +204,18 @@ func Excel(d Data) ([]byte, error) {
 	f.NewSheet(sales)
 	w = &sheetWriter{f: f, sheet: sales, row: 1, styles: st}
 	w.heading(d, fmt.Sprintf("Daftar transaksi (%d)", len(d.Sales)))
-	w.header("Waktu", "No. Nota", "Kasir", "Loket", "Total", "Bayar", "Kembali", "Cetak")
+	w.header("Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total", "Bayar", "Kembali", "Cetak")
 	var total int64
 	for _, s := range d.Sales {
-		w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
+		w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), text(shiftName(s)), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
 		total += s.Total
 	}
-	w.data(true, text("Total"), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""))
+	w.data(true, text("Total"), text(""), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""))
 	f.SetColWidth(sales, "A", "A", 18)
 	f.SetColWidth(sales, "B", "B", 22)
-	f.SetColWidth(sales, "C", "D", 16)
-	f.SetColWidth(sales, "E", "G", 14)
-	f.SetColWidth(sales, "H", "H", 8)
+	f.SetColWidth(sales, "C", "E", 16)
+	f.SetColWidth(sales, "F", "H", 14)
+	f.SetColWidth(sales, "I", "I", 8)
 
 	f.SetActiveSheet(0)
 

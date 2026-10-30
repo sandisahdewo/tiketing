@@ -41,6 +41,10 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 		where += " AND s.counter_id = ?"
 		args = append(args, q.CounterID)
 	}
+	if q.ShiftTypeID > 0 {
+		where += " AND s.shift_id IN (SELECT id FROM shifts WHERE type_id = ?)"
+		args = append(args, q.ShiftTypeID)
+	}
 	// Only the items of the category count; both queries join tickets t.
 	if q.Category != "" {
 		where += " AND t.category = ?"
@@ -108,7 +112,8 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 	return report, trows.Err()
 }
 
-// ReportFilters lists every cashier (deleted ones last) and every counter.
+// ReportFilters lists every cashier (deleted ones last), every counter and
+// every shift type.
 func (s *Store) ReportFilters() (model.ReportFilters, error) {
 	out := model.ReportFilters{Cashiers: []model.ReportCashier{}}
 	rows, err := s.DB.Query(`SELECT id, full_name, deleted_at IS NOT NULL FROM users ORDER BY deleted_at IS NOT NULL, full_name COLLATE NOCASE`)
@@ -126,6 +131,9 @@ func (s *Store) ReportFilters() (model.ReportFilters, error) {
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	out.Counters, err = s.ListCounters()
+	if out.Counters, err = s.ListCounters(); err != nil {
+		return out, err
+	}
+	out.ShiftTypes, err = s.ListShiftTypes(false)
 	return out, err
 }

@@ -202,7 +202,8 @@ func (l *Logged) DeleteUser(token string, id int64) error {
 func (l *Logged) CreateSale(token string, in model.SaleInput) (model.Sale, error) {
 	c := l.begin(token)
 	out, err := c.svc.CreateSale(token, in)
-	c.log("CreateSale", err, in, "invoice", out.InvoiceNo, "counter", out.Terminal, "items", len(in.Items), "total", money.Format(out.Total), "paid", money.Format(in.Paid))
+	c.log("CreateSale", err, in, "invoice", out.InvoiceNo, "counter", out.Terminal, "items", len(in.Items), "total", money.Format(out.Total), "paid", money.Format(in.Paid),
+		"replaces", in.ReplacesSaleID, "reason", in.Reason)
 	return out, err
 }
 
@@ -239,7 +240,7 @@ func (l *Logged) DeleteSale(token string, in model.DeleteSaleInput) error {
 func (l *Logged) Report(token string, q model.ReportQuery) (model.Report, error) {
 	c := l.begin(token)
 	out, err := c.svc.Report(token, q)
-	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "category", q.Category, "userId", q.UserID, "counterId", q.CounterID, "total", money.Format(out.Total))
+	c.log("Report", err, q, "period", out.Period, "from", out.From, "to", out.To, "category", q.Category, "userId", q.UserID, "counterId", q.CounterID, "shiftTypeId", q.ShiftTypeID, "total", money.Format(out.Total))
 	return out, err
 }
 
@@ -248,6 +249,73 @@ func (l *Logged) ReportFilters(token string) (model.ReportFilters, error) {
 	out, err := c.svc.ReportFilters(token)
 	c.logError("ReportFilters", err, nil)
 	return out, err
+}
+
+func (l *Logged) ListShiftTypes(token string) ([]model.ShiftType, error) {
+	c := l.begin(token)
+	out, err := c.svc.ListShiftTypes(token)
+	c.logError("ListShiftTypes", err, nil)
+	return out, err
+}
+
+func (l *Logged) SaveShiftType(token string, in model.ShiftTypeInput) (model.ShiftType, error) {
+	c := l.begin(token)
+	out, err := c.svc.SaveShiftType(token, in)
+	c.log("SaveShiftType", err, in, "id", out.ID, "name", in.Name, "start", in.StartTime, "end", in.EndTime)
+	return out, err
+}
+
+func (l *Logged) SetShiftTypeActive(token string, id int64, active bool) error {
+	c := l.begin(token)
+	err := c.svc.SetShiftTypeActive(token, id, active)
+	c.log("SetShiftTypeActive", err, nil, "id", id, "active", active)
+	return err
+}
+
+// ShiftStatus runs whenever the cashier screen opens; only failures are
+// worth a line.
+func (l *Logged) ShiftStatus(token, deviceID string) (model.ShiftStatus, error) {
+	c := l.begin(token)
+	out, err := c.svc.ShiftStatus(token, deviceID)
+	c.logError("ShiftStatus", err, nil)
+	return out, err
+}
+
+func (l *Logged) OpenShift(token string, in model.OpenShiftInput) (model.Shift, error) {
+	c := l.begin(token)
+	out, err := c.svc.OpenShift(token, in)
+	c.log("OpenShift", err, in, "shift", out.ID, "name", out.Name, "counter", out.CounterName, "date", out.BusinessDate,
+		"openingCash", money.Format(in.OpeningCash))
+	return out, err
+}
+
+func (l *Logged) CloseShift(token string, in model.CloseShiftInput) (model.ShiftClosing, error) {
+	c := l.begin(token)
+	out, err := c.svc.CloseShift(token, in)
+	c.log("CloseShift", err, in, "shift", in.ShiftID, "revision", in.Revision, "expected", money.Format(out.ExpectedCash),
+		"actual", money.Format(in.ActualCash), "difference", money.Format(out.Difference), "note", in.Note)
+	return out, err
+}
+
+func (l *Logged) GetShift(token string, id int64) (model.ShiftReport, error) {
+	c := l.begin(token)
+	out, err := c.svc.GetShift(token, id)
+	c.logError("GetShift", err, nil, "id", id)
+	return out, err
+}
+
+func (l *Logged) ShiftDay(token string, q model.ShiftDayQuery) (model.ShiftDay, error) {
+	c := l.begin(token)
+	out, err := c.svc.ShiftDay(token, q)
+	c.logError("ShiftDay", err, q)
+	return out, err
+}
+
+func (l *Logged) RecordShiftClosingPrint(token string, closingID int64) error {
+	c := l.begin(token)
+	err := c.svc.RecordShiftClosingPrint(token, closingID)
+	c.log("RecordShiftClosingPrint", err, nil, "closing", closingID)
+	return err
 }
 
 func (l *Logged) RecordPrint(token string, in model.PrintInput) error {

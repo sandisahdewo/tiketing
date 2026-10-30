@@ -16,6 +16,10 @@ export function ChooseLogo():Promise<boolean>;
 
 export function ChooseRestoreFile():Promise<main.RestoreInfo>;
 
+export function CloseShift(arg1:model.CloseShiftInput):Promise<model.ShiftClosing>;
+
+export function CorrectSale(arg1:number,arg2:string,arg3:Array<model.SaleItemInput>,arg4:number):Promise<model.Sale>;
+
 export function CreateFirstAdmin(arg1:model.UserInput):Promise<void>;
 
 export function CreateSale(arg1:Array<model.SaleItemInput>,arg2:number):Promise<model.Sale>;
@@ -38,11 +42,15 @@ export function GetSale(arg1:number):Promise<model.Sale>;
 
 export function GetSettings():Promise<model.Settings>;
 
+export function GetShift(arg1:number):Promise<model.ShiftReport>;
+
 export function ListCounters():Promise<Array<model.Counter>>;
 
 export function ListPrinters():Promise<Array<string>>;
 
 export function ListSales(arg1:model.SaleQuery):Promise<Array<model.Sale>>;
+
+export function ListShiftTypes():Promise<Array<model.ShiftType>>;
 
 export function ListTickets(arg1:string,arg2:boolean,arg3:boolean):Promise<Array<model.Ticket>>;
 
@@ -56,7 +64,13 @@ export function Logout():Promise<void>;
 
 export function MyCounter():Promise<model.Counter>;
 
+export function OpenShift(arg1:number,arg2:number):Promise<model.Shift>;
+
 export function PrintReceipt(arg1:number):Promise<string>;
+
+export function PrintShiftClosing(arg1:number):Promise<string>;
+
+export function PrintShiftDay(arg1:string):Promise<string>;
 
 export function PrintTest():Promise<string>;
 
@@ -82,6 +96,8 @@ export function SaveLocalSettings(arg1:string,arg2:number):Promise<void>;
 
 export function SaveSettings(arg1:model.Settings):Promise<void>;
 
+export function SaveShiftType(arg1:model.ShiftTypeInput):Promise<model.ShiftType>;
+
 export function SaveTicket(arg1:model.TicketInput):Promise<model.Ticket>;
 
 export function SaveUser(arg1:model.UserInput):Promise<model.User>;
@@ -92,11 +108,21 @@ export function SearchTickets(arg1:model.TicketQuery):Promise<model.TicketPage>;
 
 export function SetCounterActive(arg1:number,arg2:boolean):Promise<void>;
 
+export function SetShiftTypeActive(arg1:number,arg2:boolean):Promise<void>;
+
 export function SetTicketActive(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetupClient(arg1:string):Promise<void>;
 
 export function SetupServer(arg1:number):Promise<void>;
+
+export function ShiftClosingPreview(arg1:model.ShiftClosing):Promise<main.ReceiptView>;
+
+export function ShiftDay(arg1:string):Promise<model.ShiftDay>;
+
+export function ShiftDayPreview(arg1:string):Promise<main.ReceiptView>;
+
+export function ShiftStatus():Promise<model.ShiftStatus>;
 
 export function Status():Promise<model.Status>;
 

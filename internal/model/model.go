@@ -111,11 +111,14 @@ type SaleItemInput struct {
 }
 
 // SaleInput is a sale from the PC with DeviceID; the server takes the counter
-// (name and invoice code) from that PC's assignment.
+// (name and invoice code) from that PC's assignment. With ReplacesSaleID it
+// corrects that sale, which is deleted with Reason in the same step.
 type SaleInput struct {
-	DeviceID string          `json:"deviceId"`
-	Items    []SaleItemInput `json:"items"`
-	Paid     int64           `json:"paid"`
+	DeviceID       string          `json:"deviceId"`
+	Items          []SaleItemInput `json:"items"`
+	Paid           int64           `json:"paid"`
+	ReplacesSaleID int64           `json:"replacesSaleId"`
+	Reason         string          `json:"reason"`
 }
 
 type SaleItem struct {
@@ -135,9 +138,11 @@ type Sale struct {
 	CashierName string `json:"cashierName"`
 	// Terminal is the counter name printed on the receipt when the sale was
 	// made; CounterName is that counter's name now (for lists and reports).
-	Terminal     string     `json:"terminal"`
-	CounterID    int64      `json:"counterId"`
-	CounterName  string     `json:"counterName"`
+	Terminal    string `json:"terminal"`
+	CounterID   int64  `json:"counterId"`
+	CounterName string `json:"counterName"`
+	// ShiftName is the shift the sale was made in ("" before shifts).
+	ShiftName    string     `json:"shiftName"`
 	Total        int64      `json:"total"`
 	Paid         int64      `json:"paid"`
 	ChangeAmount int64      `json:"changeAmount"`
@@ -148,6 +153,14 @@ type Sale struct {
 	DeletedAt     *string `json:"deletedAt"`
 	DeletedByName string  `json:"deletedByName"`
 	DeleteReason  string  `json:"deleteReason"`
+
+	// ShiftID is 0 for sales from before shifts.
+	ShiftID int64 `json:"shiftId"`
+	// A correction names the sale it replaces; a corrected (deleted) sale
+	// names the one that replaced it.
+	ReplacesSaleID      int64  `json:"replacesSaleId"`
+	ReplacesInvoiceNo   string `json:"replacesInvoiceNo"`
+	ReplacedByInvoiceNo string `json:"replacedByInvoiceNo"`
 }
 
 type SaleQuery struct {
@@ -162,15 +175,17 @@ type SaleQuery struct {
 // Category keeps the sales that contain at least one item of it (and, in a
 // report, counts only those items).
 type ReportFilter struct {
-	Category  string `json:"category"`
-	UserID    int64  `json:"userId"`
-	CounterID int64  `json:"counterId"`
+	Category    string `json:"category"`
+	UserID      int64  `json:"userId"`
+	CounterID   int64  `json:"counterId"`
+	ShiftTypeID int64  `json:"shiftTypeId"`
 }
 
 // ReportFilters lists the choices for the report filters.
 type ReportFilters struct {
-	Cashiers []ReportCashier `json:"cashiers"`
-	Counters []Counter       `json:"counters"`
+	Cashiers   []ReportCashier `json:"cashiers"`
+	Counters   []Counter       `json:"counters"`
+	ShiftTypes []ShiftType     `json:"shiftTypes"`
 }
 
 type ReportCashier struct {
@@ -247,6 +262,154 @@ type Report struct {
 	TicketTotal  int64             `json:"ticketTotal"`
 	TopupQty     int64             `json:"topupQty"`
 	TopupTotal   int64             `json:"topupTotal"`
+}
+
+// ShiftType is a shift an admin sets up, e.g. Siang 06:00-14:00. An EndTime
+// at or before StartTime ends the next day.
+type ShiftType struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
+	Active    bool   `json:"active"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type ShiftTypeInput struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
+}
+
+// Shift is one cashier's shift at one counter. Name and hours are those of
+// its type when it opened. BusinessDate is the day it belongs to (a night
+// shift opened after midnight belongs to the day before) and ScheduledEndAt
+// is when it should end. ClosedAt is nil while it is open.
+type Shift struct {
+	ID             int64   `json:"id"`
+	TypeID         int64   `json:"typeId"`
+	Name           string  `json:"name"`
+	StartTime      string  `json:"startTime"`
+	EndTime        string  `json:"endTime"`
+	BusinessDate   string  `json:"businessDate"`
+	ScheduledEndAt string  `json:"scheduledEndAt"`
+	UserID         int64   `json:"userId"`
+	CashierName    string  `json:"cashierName"`
+	CounterID      int64   `json:"counterId"`
+	CounterName    string  `json:"counterName"`
+	OpeningCash    int64   `json:"openingCash"`
+	OpenedAt       string  `json:"openedAt"`
+	ClosedAt       *string `json:"closedAt"`
+}
+
+// ShiftSales counts the sales of a shift.
+type ShiftSales struct {
+	Transactions int64  `json:"transactions"`
+	TicketQty    int64  `json:"ticketQty"`
+	TicketTotal  int64  `json:"ticketTotal"`
+	TopupQty     int64  `json:"topupQty"`
+	TopupTotal   int64  `json:"topupTotal"`
+	Total        int64  `json:"total"`
+	FirstSaleAt  string `json:"firstSaleAt"`
+	LastSaleAt   string `json:"lastSaleAt"`
+	DeletedCount int64  `json:"deletedCount"`
+	DeletedTotal int64  `json:"deletedTotal"`
+}
+
+// ShiftClosing is the cash counted when a shift closed, kept with the shift's
+// sales as they were then, so it reads the same later on. A correction is a
+// new closing with the next revision.
+type ShiftClosing struct {
+	ID       int64      `json:"id"`
+	Shift    Shift      `json:"shift"`
+	Revision int64      `json:"revision"`
+	Sales    ShiftSales `json:"sales"`
+	// ExpectedCash is the opening cash plus the sales.
+	ExpectedCash int64  `json:"expectedCash"`
+	ActualCash   int64  `json:"actualCash"`
+	Difference   int64  `json:"difference"`
+	Note         string `json:"note"`
+	ClosedByName string `json:"closedByName"`
+	ClosedAt     string `json:"closedAt"`
+	PrintCount   int64  `json:"printCount"`
+	// The actual cash of the revision before, for a correction.
+	PreviousActual *int64 `json:"previousActual"`
+	// The sales of the shift deleted by the time of this closing.
+	Deleted []DeletedSale `json:"deleted"`
+}
+
+// DeletedSale is a deleted sale of a shift, for reviewing the shift: deleted
+// outright or replaced by a correction (ReplacedByInvoiceNo).
+type DeletedSale struct {
+	ID                  int64  `json:"id"`
+	InvoiceNo           string `json:"invoiceNo"`
+	Total               int64  `json:"total"`
+	CreatedAt           string `json:"createdAt"`
+	DeletedAt           string `json:"deletedAt"`
+	DeletedByName       string `json:"deletedByName"`
+	Reason              string `json:"reason"`
+	ReplacedByInvoiceNo string `json:"replacedByInvoiceNo"`
+}
+
+// ShiftReport is a shift with its sales now and its closings.
+type ShiftReport struct {
+	Shift        Shift      `json:"shift"`
+	Sales        ShiftSales `json:"sales"`
+	ExpectedCash int64      `json:"expectedCash"`
+	// Deleted lists the shift's deleted sales, oldest first.
+	Deleted []DeletedSale `json:"deleted"`
+	// The closing that counts (the latest revision), nil while open.
+	Closing *ShiftClosing  `json:"closing"`
+	History []ShiftClosing `json:"history"`
+	// The sales changed after the closing, e.g. a sale deleted later.
+	Changed bool `json:"changed"`
+}
+
+// ShiftStatus is what the cashier screen of a PC needs: the user's open
+// shift (Own, at any counter), another user's shift holding this PC's
+// counter (Blocking, without its numbers) and the types a shift can be
+// opened with. ServerTime lets the PC judge ScheduledEndAt by the server's
+// clock.
+type ShiftStatus struct {
+	CounterID       int64        `json:"counterId"`
+	CounterName     string       `json:"counterName"`
+	Own             *ShiftReport `json:"own"`
+	Blocking        *Shift       `json:"blocking"`
+	Types           []ShiftType  `json:"types"`
+	SuggestedTypeID int64        `json:"suggestedTypeId"`
+	ServerTime      string       `json:"serverTime"`
+}
+
+// OpenShiftInput opens a shift at the counter of the PC DeviceID, with
+// OpeningCash in the drawer.
+type OpenShiftInput struct {
+	DeviceID    string `json:"deviceId"`
+	TypeID      int64  `json:"typeId"`
+	OpeningCash int64  `json:"openingCash"`
+}
+
+// CloseShiftInput closes a shift (Revision 0) or corrects its closing
+// (Revision is the latest one + 1). A stale Revision is refused, so a shift
+// closed meanwhile from another PC is not corrected by accident.
+type CloseShiftInput struct {
+	ShiftID    int64  `json:"shiftId"`
+	Revision   int64  `json:"revision"`
+	ActualCash int64  `json:"actualCash"`
+	Note       string `json:"note"`
+}
+
+type ShiftDayQuery struct {
+	Date string `json:"date"`
+}
+
+// ShiftDay lists the shifts of a business date, and the open shifts of other
+// dates so a forgotten one is found.
+type ShiftDay struct {
+	Date     string        `json:"date"`
+	Shifts   []ShiftReport `json:"shifts"`
+	Unclosed []Shift       `json:"unclosed"`
 }
 
 type Settings struct {
