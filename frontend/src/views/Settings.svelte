@@ -27,9 +27,13 @@
   let logoBusy = $state(false)
 
   const localForm = new FormState(() => ({}))
-  // Printing problems belong to the printer field.
-  // "Printer belum dipilih" is about the field; a print that fails is not.
-  const localFields = { paperWidth: /kertas/i, printerName: /printer belum dipilih/i }
+  // Only a wrong choice of printer goes under the printer field (none chosen,
+  // a virtual one, one Windows no longer has). A printer that is offline or
+  // out of paper ("kertas habis") is not about a field, so it is shown above.
+  const localFields = {
+    paperWidth: /lebar kertas/i,
+    printerName: /printer belum dipilih|printer virtual|bukan ke printer thermal|pilih ulang printer/i,
+  }
 
   // This PC's counter. Only an admin picks it, from the counters in the Loket menu.
   let myCounter = $state<model.Counter | null>(null)
