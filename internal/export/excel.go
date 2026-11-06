@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/xuri/excelize/v2"
+
+	"tiket/internal/model"
 )
 
 type sheetWriter struct {
@@ -146,8 +148,8 @@ func hasCents(d Data) bool {
 	return false
 }
 
-// Excel renders the report as an .xlsx workbook with three sheets:
-// summary per period, per item, and the transaction list.
+// Excel renders the report as an .xlsx workbook with three sheets (summary per
+// period, per item, and the transaction list), or one tab of it as one sheet.
 func Excel(d Data) ([]byte, error) {
 	f := excelize.NewFile()
 	defer f.Close()
@@ -162,60 +164,100 @@ func Excel(d Data) ([]byte, error) {
 	}
 	r := d.Report
 
-	// Sheet 1: summary + per period
-	const summary = "Ringkasan"
-	f.SetSheetName("Sheet1", summary)
-	w := &sheetWriter{f: f, sheet: summary, row: 1, styles: st}
-	w.heading(d, "")
-	w.header("Ringkasan", "Jumlah", "Pendapatan")
-	w.data(false, text("Jumlah transaksi"), num(r.Transactions), text(""))
-	w.data(false, text("Tiket"), num(r.TicketQty), rupiah(r.TicketTotal))
-	w.data(false, text("Topup Card"), num(r.TopupQty), rupiah(r.TopupTotal))
-	w.data(true, text("Total"), num(r.Qty), rupiah(r.Total))
-	w.row++
-	w.line(w.styles.bold, "Per periode ("+periodName[r.Period]+")")
-	w.header("Periode", "Transaksi", "Tiket", "Rp Tiket", "Topup", "Rp Topup", "Total")
-	for _, row := range r.Rows {
-		w.data(false, text(periodLabel(row.Period, r.Period)), num(row.Transactions), num(row.TicketQty), rupiah(row.TicketTotal), num(row.TopupQty), rupiah(row.TopupTotal), rupiah(row.Total))
-	}
-	w.data(true, text("Total"), num(r.Transactions), num(r.TicketQty), rupiah(r.TicketTotal), num(r.TopupQty), rupiah(r.TopupTotal), rupiah(r.Total))
-	f.SetColWidth(summary, "A", "A", 28)
-	f.SetColWidth(summary, "B", "G", 15)
-
-	// Sheet 2: per item
-	const items = "Per Item"
-	f.NewSheet(items)
-	w = &sheetWriter{f: f, sheet: items, row: 1, styles: st}
-	w.heading(d, "Penjualan per item")
-	w.header("Kategori", "Item", "Terjual", "Total")
-	for _, g := range itemGroups(r) {
-		for _, it := range g.items {
-			w.data(false, text(g.label), text(it.TicketName), num(it.Qty), rupiah(it.Total))
+	first := true
+	sheet := func(name string) *sheetWriter {
+		if first {
+			f.SetSheetName("Sheet1", name)
+			first = false
+		} else {
+			f.NewSheet(name)
 		}
-		w.data(true, text("Subtotal "+g.label), text(""), num(g.qty), rupiah(g.total))
+		return &sheetWriter{f: f, sheet: name, row: 1, styles: st}
 	}
-	w.data(true, text("Total"), text(""), num(r.Qty), rupiah(r.Total))
-	f.SetColWidth(items, "A", "A", 22)
-	f.SetColWidth(items, "B", "B", 32)
-	f.SetColWidth(items, "C", "D", 15)
 
-	// Sheet 3: transactions
-	const sales = "Transaksi"
-	f.NewSheet(sales)
-	w = &sheetWriter{f: f, sheet: sales, row: 1, styles: st}
-	w.heading(d, fmt.Sprintf("Daftar transaksi (%d)", len(d.Sales)))
-	w.header("Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total", "Bayar", "Kembali", "Cetak")
-	var total int64
-	for _, s := range d.Sales {
-		w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), text(shiftName(s)), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
-		total += s.Total
+	if d.includes(KindPeriod) {
+		name := "Ringkasan"
+		if d.Kind != KindAll {
+			name = d.tabName()
+		}
+		w := sheet(name)
+		w.heading(d, "")
+		if d.Kind == KindAll {
+			w.header("Ringkasan", "Jumlah", "Pendapatan")
+			w.data(false, text("Jumlah transaksi"), num(r.Transactions), text(""))
+			w.data(false, text("Tiket"), num(r.TicketQty), rupiah(r.TicketTotal))
+			w.data(false, text("Topup Card"), num(r.TopupQty), rupiah(r.TopupTotal))
+			w.data(true, text("Total"), num(r.Qty), rupiah(r.Total))
+			w.row++
+			w.line(w.styles.bold, "Per periode ("+periodName[r.Period]+")")
+		}
+		w.header("Periode", "Transaksi", "Tiket", "Rp Tiket", "Topup", "Rp Topup", "Total")
+		for _, row := range r.Rows {
+			w.data(false, text(model.PeriodLabel(row.Period, r.Period)), num(row.Transactions), num(row.TicketQty), rupiah(row.TicketTotal), num(row.TopupQty), rupiah(row.TopupTotal), rupiah(row.Total))
+		}
+		w.data(true, text("Total"), num(r.Transactions), num(r.TicketQty), rupiah(r.TicketTotal), num(r.TopupQty), rupiah(r.TopupTotal), rupiah(r.Total))
+		f.SetColWidth(name, "A", "A", 28)
+		f.SetColWidth(name, "B", "G", 15)
 	}
-	w.data(true, text("Total"), text(""), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""))
-	f.SetColWidth(sales, "A", "A", 18)
-	f.SetColWidth(sales, "B", "B", 22)
-	f.SetColWidth(sales, "C", "E", 16)
-	f.SetColWidth(sales, "F", "H", 14)
-	f.SetColWidth(sales, "I", "I", 8)
+
+	if d.includes(KindItems) {
+		const items = "Per Item"
+		w := sheet(items)
+		w.heading(d, "Penjualan per item")
+		w.header("Kategori", "Item", "Terjual", "Total")
+		for _, g := range r.ItemGroups() {
+			for _, it := range g.Items {
+				w.data(false, text(g.Label), text(it.TicketName), num(it.Qty), rupiah(it.Total))
+			}
+			w.data(true, text("Subtotal "+g.Label), text(""), num(g.Qty), rupiah(g.Total))
+		}
+		w.data(true, text("Total"), text(""), num(r.Qty), rupiah(r.Total))
+		f.SetColWidth(items, "A", "A", 22)
+		f.SetColWidth(items, "B", "B", 32)
+		f.SetColWidth(items, "C", "D", 15)
+	}
+
+	if d.includes(KindSales) {
+		var total int64
+		if d.Deleted {
+			const deleted = "Nota Dihapus"
+			w := sheet(deleted)
+			w.heading(d, fmt.Sprintf("Nota dihapus (%d)", len(d.Sales)))
+			w.header("Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total", "Dihapus", "Oleh", "Alasan", "Diganti")
+			for _, s := range d.Sales {
+				at := ""
+				if s.DeletedAt != nil {
+					at = formatDateTime(*s.DeletedAt)
+				}
+				w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), text(shiftName(s)), rupiah(s.Total), text(at), text(s.DeletedByName), text(s.DeleteReason), text(s.ReplacedByInvoiceNo))
+				total += s.Total
+			}
+			w.data(true, text("Total"), text(""), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""), text(""))
+			f.SetColWidth(deleted, "A", "A", 18)
+			f.SetColWidth(deleted, "B", "B", 22)
+			f.SetColWidth(deleted, "C", "E", 16)
+			f.SetColWidth(deleted, "F", "F", 14)
+			f.SetColWidth(deleted, "G", "G", 18)
+			f.SetColWidth(deleted, "H", "H", 16)
+			f.SetColWidth(deleted, "I", "I", 32)
+			f.SetColWidth(deleted, "J", "J", 22)
+		} else {
+			const sales = "Transaksi"
+			w := sheet(sales)
+			w.heading(d, fmt.Sprintf("Daftar transaksi (%d)", len(d.Sales)))
+			w.header("Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total", "Bayar", "Kembali", "Cetak")
+			for _, s := range d.Sales {
+				w.data(false, text(formatDateTime(s.CreatedAt)), text(s.InvoiceNo), text(s.CashierName), text(counterName(s)), text(shiftName(s)), rupiah(s.Total), rupiah(s.Paid), rupiah(s.ChangeAmount), num(s.PrintCount))
+				total += s.Total
+			}
+			w.data(true, text("Total"), text(""), text(""), text(""), text(""), rupiah(total), text(""), text(""), text(""))
+			f.SetColWidth(sales, "A", "A", 18)
+			f.SetColWidth(sales, "B", "B", 22)
+			f.SetColWidth(sales, "C", "E", 16)
+			f.SetColWidth(sales, "F", "H", 14)
+			f.SetColWidth(sales, "I", "I", 8)
+		}
+	}
 
 	f.SetActiveSheet(0)
 

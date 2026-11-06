@@ -5,11 +5,145 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tiket/internal/config"
 	"tiket/internal/db"
+	"tiket/internal/export"
 	"tiket/internal/model"
+	"tiket/internal/receipt"
 )
+
+func TestReportPrint(t *testing.T) {
+	a := NewApp(t.TempDir())
+	a.cfg = config.Config{Mode: config.ModeServer, Port: 0, DeviceID: "server-pc"}
+	if err := a.activate(); err != nil {
+		t.Fatal(err)
+	}
+	defer a.deactivate()
+	c, err := a.local.Store.CreateCounter(model.CounterInput{Name: "LOKET 1", InvoiceCode: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.local.Store.AssignCounter(c.ID, a.cfg.DeviceID, "SERVER", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.CreateFirstAdmin(model.UserInput{Username: "admin", FullName: "Pak Admin", Password: "rahasia"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Login("admin", "rahasia"); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := a.SaveTicket(model.TicketInput{Name: "Entry", Price: 1000000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := a.ShiftStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.OpenShift(st.SuggestedTypeID, 0); err != nil {
+		t.Fatal(err)
+	}
+	sell := func() model.Sale {
+		t.Helper()
+		sale, err := a.CreateSale([]model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, 1000000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sale
+	}
+	first, second := sell(), sell()
+	if err := a.DeleteSale(second.ID, "salah input"); err != nil {
+		t.Fatal(err)
+	}
+
+	today := time.Now().Format("2006-01-02")
+	request := func(kind string) ReportTab {
+		return ReportTab{Kind: kind, Query: model.ReportQuery{Period: "daily", From: today, To: today}}
+	}
+	preview := func(p ReportTab) string {
+		t.Helper()
+		v, err := a.ReportPrintPreview(p)
+		if err != nil {
+			t.Fatalf("%+v: %v", p, err)
+		}
+		return receipt.Text(v.Lines)
+	}
+	has := func(text string, wants ...string) {
+		t.Helper()
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Errorf("missing %q in\n%s", want, text)
+			}
+		}
+	}
+
+	has(preview(request(export.KindPeriod)), "PENJUALAN PER HARI", "Transaksi")
+	has(preview(request(export.KindItems)), "PENJUALAN PER ITEM", "Entry")
+	list := preview(request(export.KindSales))
+	has(list, "DAFTAR TRANSAKSI", first.InvoiceNo)
+	if strings.Contains(list, second.InvoiceNo) {
+		t.Errorf("a deleted sale on the list:\n%s", list)
+	}
+
+	gone := request(export.KindSales)
+	gone.Deleted = true
+	has(preview(gone), "NOTA DIHAPUS", second.InvoiceNo, "salah input")
+
+	found := request(export.KindSales)
+	found.Search = "tidak ada yang cocok"
+	has(preview(found), "Cari: tidak ada yang cocok", "Tidak ada transaksi.")
+
+	for _, kind := range []string{"lain", export.KindAll} {
+		if _, err := a.ReportPrintPreview(request(kind)); err == nil {
+			t.Errorf("printing kind %q was accepted", kind)
+		}
+	}
+
+	// An export holds what its tab holds. The whole report never takes the
+	// search or the deleted sales of the list's tab.
+	exported := func(p ReportTab, format string) export.Data {
+		t.Helper()
+		svc, token, err := a.service()
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := a.exportData(svc, token, p, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	if d := exported(request(export.KindItems), "pdf"); len(d.Sales) != 0 || d.SalesCount != 0 || d.PrintedBy != "Pak Admin" {
+		t.Errorf("items export: %+v", d)
+	}
+	if d := exported(gone, "xlsx"); !d.Deleted || len(d.Sales) != 1 || d.Sales[0].ID != second.ID {
+		t.Errorf("deleted export: %+v", d)
+	}
+	if d := exported(found, "xlsx"); len(d.Sales) != 0 || d.Filter != "Cari: tidak ada yang cocok" {
+		t.Errorf("searched export: %+v", d)
+	}
+	whole := request(export.KindAll)
+	whole.Deleted, whole.Search = true, "tidak ada yang cocok"
+	if d := exported(whole, "xlsx"); d.Deleted || d.Filter != "" || len(d.Sales) != 1 || d.Sales[0].ID != first.ID {
+		t.Errorf("whole report: %+v", d)
+	}
+	svc, token, _ := a.service()
+	if _, err := a.exportData(svc, token, request("lain"), "pdf"); err == nil {
+		t.Error("an unknown export kind was accepted")
+	}
+
+	// A list too long for the paper is refused, with a way out; the other
+	// reports of the same sales still print.
+	for i := 0; i < receipt.MaxSalesList; i++ {
+		sell()
+	}
+	if _, err := a.ReportPrintPreview(request(export.KindSales)); err == nil || !strings.Contains(err.Error(), "PDF/Excel") {
+		t.Errorf("long list: %v", err)
+	}
+	has(preview(request(export.KindItems)), "PENJUALAN PER ITEM")
+}
 
 func TestRestoreDatabase(t *testing.T) {
 	dir := t.TempDir()

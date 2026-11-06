@@ -18,7 +18,8 @@
     emptyText = 'Tidak ada transaksi.',
     highlight = null,
     filter = { category: '', userId: 0, counterId: 0, shiftTypeId: 0 },
-    ondeleted
+    ondeleted,
+    onsearch
   }: {
     from: string
     to: string
@@ -33,6 +34,8 @@
     // optional report filters (category, cashier, counter, shift)
     filter?: { category: string; userId: number; counterId: number; shiftTypeId: number }
     ondeleted?: () => void
+    // told the search the list is showing
+    onsearch?: (search: string) => void
   } = $props()
 
   // highlight is applied to the first load only; later pages and searches are normal.
@@ -98,7 +101,10 @@
   // Wait for a pause in typing before searching.
   $effect(() => {
     const value = search.trim()
-    const timer = setTimeout(() => (appliedSearch = value), 300)
+    const timer = setTimeout(() => {
+      appliedSearch = value
+      onsearch?.(value)
+    }, 300)
     return () => clearTimeout(timer)
   })
 

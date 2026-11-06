@@ -239,12 +239,11 @@ func (s *Store) loadItems(sales []model.Sale) error {
 // salesFilter is the WHERE clause shared by the sale list queries. A userID
 // > 0 limits it to that cashier and overrides q.UserID.
 func salesFilter(q model.SaleQuery, userID int64) (string, []any, error) {
-	start, end, err := dateRange(q.From, q.To)
+	dates, args, err := saleDates(q.From, q.To, q.ShiftTypeID)
 	if err != nil {
 		return "", nil, err
 	}
-	where := " WHERE s.created_at >= ? AND s.created_at < ?"
-	args := []any{start, end}
+	where := " WHERE " + dates
 	if q.Deleted {
 		where += " AND s.deleted_at IS NOT NULL"
 	} else {
@@ -264,10 +263,6 @@ func salesFilter(q model.SaleQuery, userID int64) (string, []any, error) {
 	if q.Category != "" {
 		where += " AND EXISTS (SELECT 1 FROM sale_items ci JOIN tickets ct ON ct.id = ci.ticket_id WHERE ci.sale_id = s.id AND ct.category = ?)"
 		args = append(args, q.Category)
-	}
-	if q.ShiftTypeID > 0 {
-		where += " AND s.shift_id IN (SELECT id FROM shifts WHERE type_id = ?)"
-		args = append(args, q.ShiftTypeID)
 	}
 	if search := strings.TrimSpace(q.Search); search != "" {
 		where += ` AND (s.invoice_no LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\' OR c.name LIKE ? ESCAPE '\'

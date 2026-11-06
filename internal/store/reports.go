@@ -4,22 +4,41 @@ import (
 	"tiket/internal/model"
 )
 
-var periodExpr = map[string]string{
-	"daily":   "date(s.created_at)",
-	"weekly":  "date(s.created_at, 'weekday 0', '-6 days')",
-	"monthly": "strftime('%Y-%m', s.created_at)",
+var periodExpr = map[string]func(date string) string{
+	"daily":   func(date string) string { return "date(" + date + ")" },
+	"weekly":  func(date string) string { return "date(" + date + ", 'weekday 0', '-6 days')" },
+	"monthly": func(date string) string { return "strftime('%Y-%m', " + date + ")" },
+}
+
+// saleDates is the WHERE condition for a date range: the date of the sale, or
+// with a shift type the date of its shift, so that a night shift past midnight
+// stays whole.
+func saleDates(from, to string, shiftTypeID int64) (string, []any, error) {
+	start, end, err := dateRange(from, to)
+	if err != nil {
+		return "", nil, err
+	}
+	if shiftTypeID > 0 {
+		return "s.shift_id IN (SELECT id FROM shifts WHERE type_id = ? AND business_date >= ? AND business_date <= ?)",
+			[]any{shiftTypeID, from, to}, nil
+	}
+	return "s.created_at >= ? AND s.created_at < ?", []any{start, end}, nil
 }
 
 // Report summarises non-deleted sales. A userID > 0 limits it to that
 // cashier and overrides q.UserID.
 func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) {
-	expr, ok := periodExpr[q.Period]
+	period, ok := periodExpr[q.Period]
 	if !ok {
 		return model.Report{}, model.Invalid("Periode laporan tidak valid")
 	}
-	start, end, err := dateRange(q.From, q.To)
+	dates, args, err := saleDates(q.From, q.To, q.ShiftTypeID)
 	if err != nil {
 		return model.Report{}, err
+	}
+	expr := period("s.created_at")
+	if q.ShiftTypeID > 0 {
+		expr = period("(SELECT business_date FROM shifts WHERE id = s.shift_id)")
 	}
 	report := model.Report{
 		Period:  q.Period,
@@ -28,8 +47,7 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 		Rows:    []model.ReportRow{},
 		Tickets: []model.ReportTicketRow{},
 	}
-	where := "s.created_at >= ? AND s.created_at < ? AND s.deleted_at IS NULL"
-	args := []any{start, end}
+	where := dates + " AND s.deleted_at IS NULL"
 	if userID == 0 {
 		userID = q.UserID
 	}
@@ -40,10 +58,6 @@ func (s *Store) Report(q model.ReportQuery, userID int64) (model.Report, error) 
 	if q.CounterID > 0 {
 		where += " AND s.counter_id = ?"
 		args = append(args, q.CounterID)
-	}
-	if q.ShiftTypeID > 0 {
-		where += " AND s.shift_id IN (SELECT id FROM shifts WHERE type_id = ?)"
-		args = append(args, q.ShiftTypeID)
 	}
 	// Only the items of the category count; both queries join tickets t.
 	if q.Category != "" {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-pdf/fpdf"
 
+	"tiket/internal/model"
 	"tiket/internal/money"
 )
 
@@ -93,7 +94,7 @@ func section(p *fpdf.Fpdf, tr func(string) string, title string) {
 
 func n(v int64) string { return money.Format(v * 100) }
 
-// PDF renders the report as an A4 document ready to print.
+// PDF renders the report, or one tab of it, as an A4 document ready to print.
 func PDF(d Data) ([]byte, error) {
 	p := fpdf.New("P", "mm", "A4", "")
 	p.SetMargins(pdfMargin, pdfMargin, pdfMargin)
@@ -115,54 +116,88 @@ func PDF(d Data) ([]byte, error) {
 	p.SetFont("Helvetica", "B", 15)
 	p.CellFormat(0, 8, tr(title(d)), "", 1, "L", false, 0, "")
 	p.SetFont("Helvetica", "", 10)
-	p.CellFormat(0, 6, tr("Periode: "+rangeText(r)+"   ·   "+periodName[r.Period]), "", 1, "L", false, 0, "")
+	period := "Periode: " + rangeText(r)
+	if d.Kind == KindAll {
+		period += "   ·   " + periodName[r.Period]
+	}
+	p.CellFormat(0, 6, tr(period), "", 1, "L", false, 0, "")
 	if d.Filter != "" {
 		p.CellFormat(0, 6, tr("Filter: "+d.Filter), "", 1, "L", false, 0, "")
 	}
 
-	section(p, tr, "Ringkasan")
-	t := newTable(p, tr, []string{"", "Jumlah", "Pendapatan (Rp)"}, []float64{80, 40, 60}, "LRR")
-	t.row(false, "Jumlah transaksi", n(r.Transactions), "")
-	t.row(false, "Tiket", n(r.TicketQty), money.Format(r.TicketTotal))
-	t.row(false, "Topup Card", n(r.TopupQty), money.Format(r.TopupTotal))
-	t.row(true, "Total", n(r.Qty), money.Format(r.Total))
-
-	section(p, tr, "Per periode ("+periodName[r.Period]+")")
-	t = newTable(p, tr,
-		[]string{"Periode", "Transaksi", "Tiket", "Rp Tiket", "Topup", "Rp Topup", "Total (Rp)"},
-		[]float64{44, 20, 16, 28, 16, 26, 30}, "LRRRRRR")
-	for _, row := range r.Rows {
-		t.row(false, periodLabel(row.Period, r.Period), n(row.Transactions), n(row.TicketQty), money.Format(row.TicketTotal), n(row.TopupQty), money.Format(row.TopupTotal), money.Format(row.Total))
-	}
-	t.row(true, "Total", n(r.Transactions), n(r.TicketQty), money.Format(r.TicketTotal), n(r.TopupQty), money.Format(r.TopupTotal), money.Format(r.Total))
-
-	section(p, tr, "Per item")
-	t = newTable(p, tr, []string{"Item", "Terjual", "Total (Rp)"}, []float64{100, 30, 50}, "LRR")
-	for _, g := range itemGroups(r) {
-		t.row(true, g.label, "", "")
-		for _, it := range g.items {
-			t.row(false, "   "+it.TicketName, n(it.Qty), money.Format(it.Total))
+	// One tab is named by the title already.
+	part := func(name string) {
+		if d.Kind == KindAll {
+			section(p, tr, name)
+		} else {
+			p.Ln(5)
 		}
-		t.row(true, "Subtotal "+g.label, n(g.qty), money.Format(g.total))
 	}
-	t.row(true, "Total", n(r.Qty), money.Format(r.Total))
 
-	count := max(d.SalesCount, int64(len(d.Sales)))
-	section(p, tr, "Daftar transaksi ("+strconv.FormatInt(count, 10)+")")
-	if count > PDFMaxSales {
-		p.SetFont("Helvetica", "", 10)
-		p.MultiCell(0, 6, tr(fmt.Sprintf(
-			"Terlalu banyak untuk dicetak (lebih dari %d transaksi). Daftar lengkap ada di Export Excel, atau pilih rentang tanggal yang lebih pendek.",
-			PDFMaxSales)), "", "L", false)
-		return output(p)
+	if d.Kind == KindAll {
+		section(p, tr, "Ringkasan")
+		t := newTable(p, tr, []string{"", "Jumlah", "Pendapatan (Rp)"}, []float64{80, 40, 60}, "LRR")
+		t.row(false, "Jumlah transaksi", n(r.Transactions), "")
+		t.row(false, "Tiket", n(r.TicketQty), money.Format(r.TicketTotal))
+		t.row(false, "Topup Card", n(r.TopupQty), money.Format(r.TopupTotal))
+		t.row(true, "Total", n(r.Qty), money.Format(r.Total))
 	}
-	t = newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total (Rp)"}, []float64{30, 42, 32, 26, 20, 30}, "LLLLLR")
-	var total int64
-	for _, s := range d.Sales {
-		t.row(false, formatDateTime(s.CreatedAt), s.InvoiceNo, s.CashierName, counterName(s), shiftName(s), money.Format(s.Total))
-		total += s.Total
+
+	if d.includes(KindPeriod) {
+		part("Per periode (" + periodName[r.Period] + ")")
+		t := newTable(p, tr,
+			[]string{"Periode", "Transaksi", "Tiket", "Rp Tiket", "Topup", "Rp Topup", "Total (Rp)"},
+			[]float64{44, 20, 16, 28, 16, 26, 30}, "LRRRRRR")
+		for _, row := range r.Rows {
+			t.row(false, model.PeriodLabel(row.Period, r.Period), n(row.Transactions), n(row.TicketQty), money.Format(row.TicketTotal), n(row.TopupQty), money.Format(row.TopupTotal), money.Format(row.Total))
+		}
+		t.row(true, "Total", n(r.Transactions), n(r.TicketQty), money.Format(r.TicketTotal), n(r.TopupQty), money.Format(r.TopupTotal), money.Format(r.Total))
 	}
-	t.row(true, "Total", "", "", "", "", money.Format(total))
+
+	if d.includes(KindItems) {
+		part("Per item")
+		t := newTable(p, tr, []string{"Item", "Terjual", "Total (Rp)"}, []float64{100, 30, 50}, "LRR")
+		for _, g := range r.ItemGroups() {
+			t.row(true, g.Label, "", "")
+			for _, it := range g.Items {
+				t.row(false, "   "+it.TicketName, n(it.Qty), money.Format(it.Total))
+			}
+			t.row(true, "Subtotal "+g.Label, n(g.Qty), money.Format(g.Total))
+		}
+		t.row(true, "Total", n(r.Qty), money.Format(r.Total))
+	}
+
+	if d.includes(KindSales) {
+		count := max(d.SalesCount, int64(len(d.Sales)))
+		name := "Daftar transaksi"
+		if d.Deleted {
+			name = "Nota dihapus"
+		}
+		section(p, tr, name+" ("+strconv.FormatInt(count, 10)+")")
+		if count > PDFMaxSales {
+			p.SetFont("Helvetica", "", 10)
+			p.MultiCell(0, 6, tr(fmt.Sprintf(
+				"Terlalu banyak untuk dicetak (lebih dari %d transaksi). Daftar lengkap ada di Excel, atau pilih rentang tanggal yang lebih pendek.",
+				PDFMaxSales)), "", "L", false)
+			return output(p)
+		}
+		var total int64
+		if d.Deleted {
+			t := newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Dihapus oleh", "Alasan", "Total (Rp)"}, []float64{30, 38, 24, 24, 42, 22}, "LLLLLR")
+			for _, s := range d.Sales {
+				t.row(false, formatDateTime(s.CreatedAt), s.InvoiceNo, s.CashierName, s.DeletedByName, s.DeleteReason, money.Format(s.Total))
+				total += s.Total
+			}
+			t.row(true, "Total", "", "", "", "", money.Format(total))
+		} else {
+			t := newTable(p, tr, []string{"Waktu", "No. Nota", "Kasir", "Loket", "Shift", "Total (Rp)"}, []float64{30, 42, 32, 26, 20, 30}, "LLLLLR")
+			for _, s := range d.Sales {
+				t.row(false, formatDateTime(s.CreatedAt), s.InvoiceNo, s.CashierName, counterName(s), shiftName(s), money.Format(s.Total))
+				total += s.Total
+			}
+			t.row(true, "Total", "", "", "", "", money.Format(total))
+		}
+	}
 	return output(p)
 }
 

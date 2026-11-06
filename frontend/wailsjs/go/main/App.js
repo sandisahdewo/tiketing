@@ -130,6 +130,10 @@ export function PrintReceipt(arg1) {
   return window['go']['main']['App']['PrintReceipt'](arg1);
 }
 
+export function PrintReport(arg1) {
+  return window['go']['main']['App']['PrintReport'](arg1);
+}
+
 export function PrintShiftClosing(arg1) {
   return window['go']['main']['App']['PrintShiftClosing'](arg1);
 }
@@ -160,6 +164,10 @@ export function Report(arg1) {
 
 export function ReportFilters() {
   return window['go']['main']['App']['ReportFilters']();
+}
+
+export function ReportPrintPreview(arg1) {
+  return window['go']['main']['App']['ReportPrintPreview'](arg1);
 }
 
 export function ResetSetup() {

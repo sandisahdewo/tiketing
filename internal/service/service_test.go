@@ -1241,6 +1241,85 @@ func TestShifts(t *testing.T) {
 	must(0, svc.DeleteUser(admin, siti.ID))
 }
 
+// With a shift type, the dates of a report and sale list are those of the
+// shift, so a night shift past midnight stays whole.
+func TestShiftFilterDate(t *testing.T) {
+	local, clk := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, svc)
+	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
+	sitiToken := must(svc.Login("siti", "1234")).Token
+	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")
+	var malam model.ShiftType
+	for _, st := range must(svc.ListShiftTypes(admin)) {
+		if st.Name == "Malam" {
+			malam = st
+		}
+	}
+	sell := func(token, device string, qty int64) {
+		t.Helper()
+		items := []model.SaleItemInput{{TicketID: entry.ID, Qty: qty}}
+		must(svc.CreateSale(token, model.SaleInput{DeviceID: device, Items: items, Paid: 1e10}))
+	}
+
+	clk.t = time.Date(2026, 10, 5, 23, 30, 0, 0, time.Local)
+	must(svc.OpenShift(kasir, model.OpenShiftInput{DeviceID: testDevice, TypeID: malam.ID}))
+	must(svc.OpenShift(sitiToken, model.OpenShiftInput{DeviceID: "pc-2", TypeID: malam.ID}))
+	sell(kasir, testDevice, 1)
+	sell(sitiToken, "pc-2", 2)
+	clk.t = time.Date(2026, 10, 6, 1, 30, 0, 0, time.Local)
+	sell(kasir, testDevice, 4)
+
+	byShift := model.ReportFilter{ShiftTypeID: malam.ID}
+	for _, c := range []struct {
+		name     string
+		from, to string
+		filter   model.ReportFilter
+		count    int64
+		qty      int64
+	}{
+		{"shift of its date, whole", "2026-10-05", "2026-10-05", byShift, 3, 7},
+		{"the next date has no shift", "2026-10-06", "2026-10-06", byShift, 0, 0},
+		{"one cashier's shift", "2026-10-05", "2026-10-05", model.ReportFilter{ShiftTypeID: malam.ID, UserID: siti.ID}, 1, 2},
+		{"no shift filter, date of the sale", "2026-10-05", "2026-10-05", model.ReportFilter{}, 2, 3},
+		{"no shift filter, past midnight", "2026-10-06", "2026-10-06", model.ReportFilter{}, 1, 4},
+	} {
+		r := must(svc.Report(admin, model.ReportQuery{Period: "daily", From: c.from, To: c.to, ReportFilter: c.filter}))
+		if r.Transactions != c.count || r.Qty != c.qty {
+			t.Errorf("%s: report %d sales of %d items, want %d of %d", c.name, r.Transactions, r.Qty, c.count, c.qty)
+		}
+		var itemQty int64
+		for _, it := range r.Tickets {
+			itemQty += it.Qty
+		}
+		if itemQty != c.qty {
+			t.Errorf("%s: per item %d, want %d", c.name, itemQty, c.qty)
+		}
+		q := model.SaleQuery{From: c.from, To: c.to, ReportFilter: c.filter}
+		if got := must(svc.ListSales(admin, q)); int64(len(got)) != c.count {
+			t.Errorf("%s: listed %d sales, want %d", c.name, len(got), c.count)
+		}
+		if got := must(svc.SearchSales(admin, model.SalePageQuery{SaleQuery: q, PageSize: 10})); got.Count != c.count {
+			t.Errorf("%s: searched %d sales, want %d", c.name, got.Count, c.count)
+		}
+	}
+
+	// The periods follow the shift's date too: no row for October 6.
+	for period, want := range map[string]string{"daily": "2026-10-05", "weekly": "2026-10-05", "monthly": "2026-10"} {
+		q := model.ReportQuery{Period: period, From: "2026-10-05", To: "2026-10-06", ReportFilter: byShift}
+		if r := must(svc.Report(admin, q)); len(r.Rows) != 1 || r.Rows[0].Period != want || r.Rows[0].Transactions != 3 {
+			t.Errorf("%s rows: %+v, want one for %s", period, r.Rows, want)
+		}
+	}
+	// Without the filter the same range splits at midnight.
+	if r := must(svc.Report(admin, model.ReportQuery{Period: "daily", From: "2026-10-05", To: "2026-10-06"})); len(r.Rows) != 2 {
+		t.Errorf("rows without a shift: %+v", r.Rows)
+	}
+}
+
 func TestSaleCorrection(t *testing.T) {
 	local, clk := newLocal(t)
 	srv := httptest.NewServer(server.Handler(local, testVersion))

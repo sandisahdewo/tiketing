@@ -9,9 +9,11 @@
   import SortHeader from '../components/SortHeader.svelte'
   import Modal from '../components/Modal.svelte'
   import ShiftReportModal from '../components/ShiftReportModal.svelte'
+  import ReportPrintModal from '../components/ReportPrintModal.svelte'
   import { sortRows, type Sort } from '../lib/sort'
   import { FormState } from '../lib/form.svelte'
   import { App, model, handleError, errorMessage } from '../lib/api'
+  import { main } from '../../wailsjs/go/models'
   import { formatRp } from '../lib/money'
   import { formatDate, formatPeriod, today } from '../lib/date'
   import { categories } from '../lib/colors'
@@ -155,13 +157,26 @@
     }
   }
 
-  let exporting = $state<'pdf' | 'xlsx' | null>(null)
+  // What the page holds, with the filters as they are now: the open tab, or
+  // with 'all' the whole report (for a PDF or Excel only).
+  function tabRequest(kind: string) {
+    return main.ReportTab.createFrom({
+      kind,
+      query: { period, from, to, ...filterQuery() },
+      search: kind === 'sales' ? salesSearch : '',
+      deleted: kind === 'sales' && showDeleted
+    })
+  }
+  let tabKind = $derived({ period: 'period', ticket: 'items', sales: 'sales' }[tab])
 
-  async function exportReport(format: 'pdf' | 'xlsx') {
+  // The export being made: "<kind>-<format>", where kind is the tab's or "all".
+  let exporting = $state<string | null>(null)
+
+  async function exportReport(kind: string, format: 'pdf' | 'xlsx') {
     if (exporting || (admin && !dateForm.check())) return
-    exporting = format
+    exporting = `${kind}-${format}`
     try {
-      const path = await App.ExportReport(model.ReportQuery.createFrom({ period, from, to, ...filterQuery() }), format)
+      const path = await App.ExportReport(tabRequest(kind), format)
       if (path) toast('Laporan disimpan: ' + path)
     } catch (e) {
       handleError(e)
@@ -183,6 +198,24 @@
     } else {
       shiftDay = from
     }
+  }
+
+  // Printing on the receipt printer follows the open tab.
+  let salesSearch = $state('')
+  let printLabel = $derived(
+    tab === 'period'
+      ? `Cetak Per ${{ daily: 'Hari', weekly: 'Minggu', monthly: 'Bulan' }[report?.period ?? period]}`
+      : tab === 'ticket'
+        ? 'Cetak Per Item'
+        : showDeleted
+          ? 'Cetak Nota Dihapus'
+          : 'Cetak Daftar Transaksi'
+  )
+  let printing = $state.raw<{ title: string; request: main.ReportTab } | null>(null)
+
+  function openPrint() {
+    if (admin && !dateForm.check()) return
+    printing = { title: printLabel, request: tabRequest(tabKind) }
   }
 
   $effect(() => {
@@ -215,8 +248,8 @@
         <button class="btn btn-secondary" onclick={() => load()} disabled={loading}>{loading ? 'Memuat…' : 'Muat ulang'}</button>
       {/if}
       <button class="btn btn-primary" onclick={openShiftReport}>Laporan Shift</button>
-      <button class="btn btn-secondary" onclick={() => exportReport('pdf')} disabled={exporting !== null || !report}>{exporting === 'pdf' ? 'Menyiapkan…' : 'Cetak PDF'}</button>
-      <button class="btn btn-secondary" onclick={() => exportReport('xlsx')} disabled={exporting !== null || !report}>{exporting === 'xlsx' ? 'Menyiapkan…' : 'Export Excel'}</button>
+      <button class="btn btn-secondary" onclick={() => exportReport('all', 'pdf')} disabled={exporting !== null || !report}>{exporting === 'all-pdf' ? 'Menyiapkan…' : 'Unduh PDF Lengkap'}</button>
+      <button class="btn btn-secondary" onclick={() => exportReport('all', 'xlsx')} disabled={exporting !== null || !report}>{exporting === 'all-xlsx' ? 'Menyiapkan…' : 'Unduh Excel Lengkap'}</button>
     </div>
   </div>
 
@@ -289,9 +322,14 @@
       {/if}
       <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'ticket' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'ticket')}>Per item</button>
       <button class="-mb-px border-b-2 px-4 py-2 text-sm font-medium {tab === 'sales' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}" onclick={() => (tab = 'sales')}>{showDeleted ? 'Nota dihapus' : 'Daftar transaksi'}</button>
-      {#if tab === 'sales' && admin}
-        <label class="ml-auto flex items-center gap-2 pb-1 text-sm text-slate-600"><input type="checkbox" bind:checked={showDeleted} /> Tampilkan nota dihapus</label>
-      {/if}
+      <div class="ml-auto flex items-center gap-2 pb-1">
+        {#if tab === 'sales' && admin}
+          <label class="mr-2 flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" bind:checked={showDeleted} /> Tampilkan nota dihapus</label>
+        {/if}
+        <button class="btn btn-secondary px-3 py-1.5 text-sm" onclick={openPrint} disabled={!report || loading}>{printLabel}</button>
+        <button class="btn btn-secondary px-3 py-1.5 text-sm" onclick={() => exportReport(tabKind, 'pdf')} disabled={exporting !== null || !report || loading}>{exporting === `${tabKind}-pdf` ? 'Menyiapkan…' : 'Unduh PDF'}</button>
+        <button class="btn btn-secondary px-3 py-1.5 text-sm" onclick={() => exportReport(tabKind, 'xlsx')} disabled={exporting !== null || !report || loading}>{exporting === `${tabKind}-xlsx` ? 'Menyiapkan…' : 'Unduh Excel'}</button>
+      </div>
     </div>
 
     {#if tab === 'sales' && !report}
@@ -311,6 +349,7 @@
           filter={appliedFilter}
           emptyText={showDeleted ? 'Tidak ada nota dihapus pada rentang ini.' : 'Tidak ada transaksi pada rentang ini.'}
           ondeleted={() => load(false)}
+          onsearch={(s) => (salesSearch = s)}
         />
       </div>
     {:else}
@@ -405,6 +444,10 @@
 
 {#if shiftDay}
   <ShiftReportModal date={shiftDay} onclose={() => (shiftDay = null)} onchange={() => refreshShift().catch(() => {})} />
+{/if}
+
+{#if printing}
+  <ReportPrintModal title={printing.title} request={printing.request} onclose={() => (printing = null)} />
 {/if}
 
 {#if shiftRangeAlert}

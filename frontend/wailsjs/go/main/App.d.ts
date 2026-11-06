@@ -34,7 +34,7 @@ export function DeleteUser(arg1:number):Promise<void>;
 
 export function DownloadLogs():Promise<string>;
 
-export function ExportReport(arg1:model.ReportQuery,arg2:string):Promise<string>;
+export function ExportReport(arg1:main.ReportTab,arg2:string):Promise<string>;
 
 export function GetAppInfo():Promise<main.AppInfo>;
 
@@ -68,6 +68,8 @@ export function OpenShift(arg1:number,arg2:number):Promise<model.Shift>;
 
 export function PrintReceipt(arg1:number):Promise<string>;
 
+export function PrintReport(arg1:main.ReportTab):Promise<string>;
+
 export function PrintShiftClosing(arg1:number):Promise<string>;
 
 export function PrintShiftDay(arg1:string):Promise<string>;
@@ -83,6 +85,8 @@ export function RemoveLogo():Promise<void>;
 export function Report(arg1:model.ReportQuery):Promise<model.Report>;
 
 export function ReportFilters():Promise<model.ReportFilters>;
+
+export function ReportPrintPreview(arg1:main.ReportTab):Promise<main.ReceiptView>;
 
 export function ResetSetup():Promise<void>;
 

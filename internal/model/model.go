@@ -1,6 +1,10 @@
 package model
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 const (
 	RoleAdmin = "admin"
@@ -247,6 +251,62 @@ type ReportTicketRow struct {
 	Category   string `json:"category"`
 	Qty        int64  `json:"qty"`
 	Total      int64  `json:"total"`
+}
+
+var (
+	dayNames   = []string{"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"}
+	monthNames = []string{"Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"}
+)
+
+// PeriodLabel is a report period as people read it, for a report of the given
+// kind ("daily", "weekly" or "monthly"), e.g. "Senin, 05-10-2026".
+func PeriodLabel(period, kind string) string {
+	if kind == "monthly" {
+		t, err := time.Parse("2006-01", period)
+		if err != nil {
+			return period
+		}
+		return fmt.Sprintf("%s %d", monthNames[t.Month()-1], t.Year())
+	}
+	t, err := time.Parse("2006-01-02", period)
+	if err != nil {
+		return period
+	}
+	if kind == "weekly" {
+		return t.Format("02-01-2006") + " - " + t.AddDate(0, 0, 6).Format("02-01-2006")
+	}
+	return dayNames[t.Weekday()] + ", " + t.Format("02-01-2006")
+}
+
+// ItemGroup is the items of one category of a report with their subtotal.
+type ItemGroup struct {
+	Label string
+	Items []ReportTicketRow
+	Qty   int64
+	Total int64
+}
+
+// ItemGroups groups the report's items by category, leaving out empty ones.
+func (r Report) ItemGroups() []ItemGroup {
+	categories := []struct{ value, label string }{
+		{CategoryTicket, "Tiket"},
+		{CategoryTopup, "Topup Card"},
+	}
+	var groups []ItemGroup
+	for _, c := range categories {
+		g := ItemGroup{Label: c.label}
+		for _, it := range r.Tickets {
+			if it.Category == c.value {
+				g.Items = append(g.Items, it)
+				g.Qty += it.Qty
+				g.Total += it.Total
+			}
+		}
+		if len(g.Items) > 0 {
+			groups = append(groups, g)
+		}
+	}
+	return groups
 }
 
 type Report struct {

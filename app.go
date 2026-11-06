@@ -685,44 +685,21 @@ func (a *App) Report(q model.ReportQuery) (model.Report, error) {
 	return out, a.check(err)
 }
 
-// ExportReport saves the report as "pdf" or "xlsx" through a save dialog and
-// opens the file. It returns the saved path, or "" when the dialog was cancelled.
-func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err error) {
+// ExportReport saves the whole report or one of its tabs as "pdf" or "xlsx"
+// through a save dialog and opens the file. It returns the saved path, or ""
+// when the dialog was cancelled.
+func (a *App) ExportReport(p ReportTab, format string) (path string, err error) {
 	op := applog.NewOpID()
 	defer func() {
-		a.record(op, "ExportReport", err, "format", format, "from", q.From, "to", q.To, "path", path, "cancelled", err == nil && path == "")
+		a.record(op, "ExportReport", err, "kind", p.Kind, "format", format, "from", p.Query.From, "to", p.Query.To, "path", path, "cancelled", err == nil && path == "")
 	}()
 	svc, token, err := a.serviceOp(op)
 	if err != nil {
 		return "", err
 	}
-	report, err := svc.Report(token, q)
+	data, err := a.exportData(svc, token, p, format)
 	if err != nil {
-		return "", a.check(err)
-	}
-	// A PDF of a long range only lists the count, so don't fetch every sale for it.
-	salesQuery := model.SaleQuery{From: report.From, To: report.To, ReportFilter: q.ReportFilter}
-	page, err := svc.SearchSales(token, model.SalePageQuery{SaleQuery: salesQuery, PageSize: 1})
-	if err != nil {
-		return "", a.check(err)
-	}
-	var sales []model.Sale
-	if format != "pdf" || page.Count <= export.PDFMaxSales {
-		if sales, err = svc.ListSales(token, salesQuery); err != nil {
-			return "", a.check(err)
-		}
-	}
-	settings, err := svc.GetSettings(token)
-	if err != nil {
-		return "", a.check(err)
-	}
-	filterNote, err := a.filterText(svc, token, q.ReportFilter)
-	if err != nil {
-		return "", a.check(err)
-	}
-	data := export.Data{Settings: settings, Report: report, Sales: sales, SalesCount: page.Count, Filter: filterNote, PrintedAt: time.Now()}
-	if u := a.CurrentUser(); u != nil {
-		data.PrintedBy = u.FullName
+		return "", err
 	}
 
 	var body []byte
@@ -743,7 +720,7 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 
 	path, err = wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
 		Title:           "Simpan Laporan",
-		DefaultFilename: export.FileName(report, format),
+		DefaultFilename: export.FileName(data, format),
 		Filters:         []wruntime.FileFilter{filter},
 	})
 	if err != nil || path == "" {
@@ -761,9 +738,80 @@ func (a *App) ExportReport(q model.ReportQuery, format string) (path string, err
 	return path, nil
 }
 
-// filterText describes the active report filters for an export, e.g.
-// "Kategori: Topup Card · Kasir: Budi".
-func (a *App) filterText(svc service.Service, token string, f model.ReportFilter) (string, error) {
+// exportData gathers what an export of p needs.
+func (a *App) exportData(svc service.Service, token string, p ReportTab, format string) (export.Data, error) {
+	switch p.Kind {
+	case export.KindAll, export.KindPeriod, export.KindItems, export.KindSales:
+	default:
+		return export.Data{}, model.Invalid("Jenis laporan tidak valid")
+	}
+	report, err := svc.Report(token, p.Query)
+	if err != nil {
+		return export.Data{}, a.check(err)
+	}
+	filter, err := a.reportTabFilter(svc, token, p)
+	if err != nil {
+		return export.Data{}, err
+	}
+	data := export.Data{
+		Kind: p.Kind, Deleted: p.Kind == export.KindSales && p.Deleted, Report: report,
+		Filter: strings.Join(filter, " · "), PrintedAt: time.Now(),
+	}
+	if p.Kind == export.KindAll || p.Kind == export.KindSales {
+		q := reportTabSales(p, report)
+		// A PDF of a long range only lists the count, so don't fetch every sale for it.
+		page, err := svc.SearchSales(token, model.SalePageQuery{SaleQuery: q, PageSize: 1})
+		if err != nil {
+			return export.Data{}, a.check(err)
+		}
+		data.SalesCount = page.Count
+		if format != "pdf" || page.Count <= export.PDFMaxSales {
+			if data.Sales, err = svc.ListSales(token, q); err != nil {
+				return export.Data{}, a.check(err)
+			}
+		}
+	}
+	if data.Settings, err = svc.GetSettings(token); err != nil {
+		return export.Data{}, a.check(err)
+	}
+	if u := a.CurrentUser(); u != nil {
+		data.PrintedBy = u.FullName
+	}
+	return data, nil
+}
+
+// reportTabSales is the sale list of a tab. The whole report has every sale
+// of the range: the search and deleted sales only belong to the list's tab.
+func reportTabSales(p ReportTab, r model.Report) model.SaleQuery {
+	q := model.SaleQuery{From: r.From, To: r.To, ReportFilter: p.Query.ReportFilter}
+	if p.Kind == export.KindSales {
+		q.Deleted, q.Search = p.Deleted, p.Search
+	}
+	return q
+}
+
+// reportTabFilter describes what narrows a tab, one per line.
+func (a *App) reportTabFilter(svc service.Service, token string, p ReportTab) ([]string, error) {
+	var filter []string
+	// A cashier's report is only their own sales, which the paper should say.
+	if u := a.CurrentUser(); u != nil && u.Role != model.RoleAdmin {
+		filter = []string{"Kasir: " + u.FullName}
+	} else {
+		parts, err := a.filterParts(svc, token, p.Query.ReportFilter)
+		if err != nil {
+			return nil, a.check(err)
+		}
+		filter = parts
+	}
+	if p.Kind == export.KindSales && p.Search != "" {
+		filter = append(filter, "Cari: "+p.Search)
+	}
+	return filter, nil
+}
+
+// filterParts describes the active report filters for an export or printout,
+// e.g. "Kategori: Topup Card" and "Kasir: Budi".
+func (a *App) filterParts(svc service.Service, token string, f model.ReportFilter) ([]string, error) {
 	var parts []string
 	switch f.Category {
 	case model.CategoryTicket:
@@ -772,12 +820,12 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 		parts = append(parts, "Kategori: Topup Card")
 	}
 	if f.UserID == 0 && f.CounterID == 0 && f.ShiftTypeID == 0 {
-		return strings.Join(parts, " · "), nil
+		return parts, nil
 	}
 	// Cashiers export their own report without filters, so this is an admin.
 	choices, err := svc.ReportFilters(token)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if f.UserID > 0 {
 		name := fmt.Sprintf("#%d", f.UserID)
@@ -806,7 +854,7 @@ func (a *App) filterText(svc service.Service, token string, f model.ReportFilter
 		}
 		parts = append(parts, "Shift: "+name)
 	}
-	return strings.Join(parts, " · "), nil
+	return parts, nil
 }
 
 // BackupDatabase saves a complete copy of the database where the admin
@@ -1372,6 +1420,85 @@ func (a *App) PrintShiftDay(date string) (msg string, err error) {
 	op := applog.NewOpID()
 	defer func() { a.record(op, "PrintShiftDay", err, "date", date, "result", msg) }()
 	lines, logo, err := a.shiftDayLines(op, date)
+	if err != nil {
+		return "", err
+	}
+	return a.printBytes(receipt.ESCPOS(lines, logo))
+}
+
+// ReportTab says what a tab of the report page has on screen, or with
+// export.KindAll the whole report (for an export only). Search and Deleted only
+// apply to the sale list.
+type ReportTab struct {
+	Kind    string            `json:"kind"`
+	Query   model.ReportQuery `json:"query"`
+	Search  string            `json:"search"`
+	Deleted bool              `json:"deleted"`
+}
+
+func (a *App) reportPrintLines(op string, p ReportTab) ([]receipt.Line, *receipt.Bitmap, error) {
+	svc, token, err := a.serviceOp(op)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Also for the sale list: this is where the dates a cashier gets come from.
+	report, err := svc.Report(token, p.Query)
+	if err != nil {
+		return nil, nil, a.check(err)
+	}
+	filter, err := a.reportTabFilter(svc, token, p)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var sales []model.Sale
+	if p.Kind == export.KindSales {
+		q := reportTabSales(p, report)
+		// Count first, so a long range doesn't fetch every sale just to refuse it.
+		page, err := svc.SearchSales(token, model.SalePageQuery{SaleQuery: q, PageSize: 1})
+		if err != nil {
+			return nil, nil, a.check(err)
+		}
+		if page.Count > receipt.MaxSalesList {
+			return nil, nil, model.Invalid(fmt.Sprintf("Daftar ini berisi %d nota, terlalu panjang untuk kertas nota (maksimal %d). Persempit tanggal atau filter, atau unduh sebagai PDF/Excel.", page.Count, receipt.MaxSalesList))
+		}
+		if sales, err = svc.ListSales(token, q); err != nil {
+			return nil, nil, a.check(err)
+		}
+	}
+
+	st, logo, err := a.printSetup(op)
+	if err != nil {
+		return nil, nil, err
+	}
+	width, now := a.paperWidth(), time.Now()
+	switch p.Kind {
+	case export.KindPeriod:
+		return receipt.PeriodSales(st, report, filter, width, now), logo, nil
+	case export.KindItems:
+		return receipt.ItemSales(st, report, filter, width, now), logo, nil
+	case export.KindSales:
+		return receipt.SaleList(st, report, sales, p.Deleted, filter, width, now), logo, nil
+	}
+	return nil, nil, model.Invalid("Jenis laporan tidak valid")
+}
+
+// ReportPrintPreview shows how a tab of the report page prints.
+func (a *App) ReportPrintPreview(p ReportTab) (ReceiptView, error) {
+	lines, logo, err := a.reportPrintLines(applog.NewOpID(), p)
+	if err != nil {
+		return ReceiptView{}, err
+	}
+	return ReceiptView{Lines: lines, Logo: logoDataURL(logo)}, nil
+}
+
+// PrintReport prints a tab of the report page on the receipt printer.
+func (a *App) PrintReport(p ReportTab) (msg string, err error) {
+	op := applog.NewOpID()
+	defer func() {
+		a.record(op, "PrintReport", err, "kind", p.Kind, "from", p.Query.From, "to", p.Query.To, "result", msg)
+	}()
+	lines, logo, err := a.reportPrintLines(op, p)
 	if err != nil {
 		return "", err
 	}

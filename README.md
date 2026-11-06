@@ -9,7 +9,7 @@ Fitur:
 - **Nota:** logo (bitmap) atau nama usaha, No/Date/Time In/Purpose/Cashier, label **Reprint N** untuk cetak ulang (setiap cetakan dicatat di `sale_prints`).
 - **Tiket (admin):** tambah, ubah, hapus (soft delete), dan pulihkan.
 - **Pengguna (admin):** role `admin` (semua menu) dan `kasir` (hanya penjualan).
-- **Laporan (admin):** harian, mingguan (Senin–Minggu), bulanan, per tiket, dan daftar transaksi dengan cetak ulang nota. Bisa difilter per kategori, kasir, loket, dan shift. Laporan Shift berisi semua shift dalam satu tanggal, beserta ringkasan yang bisa dicetak.
+- **Laporan (admin):** harian, mingguan (Senin–Minggu), bulanan, per tiket, dan daftar transaksi dengan cetak ulang nota. Bisa difilter per kategori, kasir, loket, dan shift. Tiap tab (per hari/minggu/bulan, per item, daftar transaksi, nota dihapus) bisa dicetak ke printer nota atau diunduh sebagai PDF/Excel sesuai filter yang dipilih; cetak nota untuk daftar transaksi maksimal 300 nota. Unduh PDF Lengkap dan Unduh Excel Lengkap berisi semua bagian sekaligus. Laporan Shift berisi semua shift dalam satu tanggal, beserta ringkasan yang bisa dicetak.
 - **Server/Client:** satu PC menyimpan database, PC lain terhubung lewat LAN.
 - **Self-update:** cek update dari GitHub Releases, dengan file yang ditandatangani ed25519.
 
@@ -46,7 +46,7 @@ Format: `{PREFIX}{KODE}{YYYYMMDD}{URUT 4 digit}`, contohnya `PNY25202610090003`.
 - Satu loket hanya boleh punya satu shift terbuka, dan satu kasir juga hanya satu. Kasir lain di PC itu baru bisa buka shift setelah shift lama ditutup oleh pemiliknya atau admin, supaya uang di laci tidak tercampur.
 - Transaksi hanya bisa dilakukan di loket tempat shift dibuka. Admin yang berjualan juga wajib buka shift.
 - Logout atau restart server tidak menutup shift. Setelah jam selesai lewat, aplikasi hanya menyarankan tutup shift dan tidak pernah menutupnya paksa.
-- Shift yang jam selesainya lebih kecil dari jam mulai (misalnya Malam 22:00–06:00) berakhir keesokan harinya. Tanggal shift ikut tanggal mulainya, jadi Malam yang dibuka pukul 00:30 masih termasuk tanggal sebelumnya. Laporan Penjualan tetap dihitung per tanggal transaksi.
+- Shift yang jam selesainya lebih kecil dari jam mulai (misalnya Malam 22:00–06:00) berakhir keesokan harinya. Tanggal shift ikut tanggal mulainya, jadi Malam yang dibuka pukul 00:30 masih termasuk tanggal sebelumnya. Laporan Penjualan dihitung per tanggal transaksi, kecuali saat filter Shift dipilih: tanggalnya mengikuti tanggal shift, jadi Malam 1 November terhitung utuh sampai 06:00 tanggal 2.
 - **Tutup shift** menyimpan potret penjualan saat itu. Keterangan wajib diisi kalau kas aktual berbeda dari kas seharusnya.
 - **Koreksi tutup shift** membuat revisi baru yang wajib diberi alasan. Kalau ada nota yang dihapus setelah shift ditutup, shift ditandai "Berubah".
 - Nama dan jam disalin ke shift saat dibuka. Mengubah jenis shift hanya berlaku untuk shift berikutnya.
