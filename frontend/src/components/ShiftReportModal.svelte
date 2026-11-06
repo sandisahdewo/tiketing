@@ -435,6 +435,7 @@
       <button class="btn btn-secondary" onclick={startCorrection} disabled={printing}>Koreksi</button>
       <button class="btn btn-primary" onclick={reprint} disabled={printing}>{printing ? 'Mencetak…' : 'Cetak Ulang'}</button>
     {/if}
-    <button class="btn btn-secondary" onclick={onclose}>Tutup</button>
+    <!-- "Tutup" next to "Tutup Shift & Cetak" reads as closing the shift. -->
+    <button class="btn btn-secondary" onclick={onclose}>{editing && !correcting && !listMode ? 'Batal' : 'Tutup'}</button>
   {/snippet}
 </Modal>
