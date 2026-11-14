@@ -5,7 +5,7 @@
   import FormAlert from '../components/FormAlert.svelte'
   import { FormState, required } from '../lib/form.svelte'
 
-  let { onlogin, onreset }: { onlogin: () => void; onreset: () => void } = $props()
+  let { onlogin, onlost }: { onlogin: () => void; onlost: () => void } = $props()
 
   let username = $state('')
   let password = $state('')
@@ -26,6 +26,12 @@
       session.user = await App.Login(username, password)
       onlogin()
     } catch (e) {
+      // A server that no longer answers is shown by the start screen, which
+      // also offers to change the mode.
+      if (!(await App.Status().then(() => true, () => false))) {
+        onlost()
+        return
+      }
       password = ''
       // A wrong login is not an input mistake: it goes above the fields.
       form.fail(errorMessage(e))
@@ -54,6 +60,5 @@
   </form>
   <div class="mt-4 text-center text-xs text-white/80">
     Versi {session.info?.version} · Mode {session.info?.mode === 'server' ? 'Server' : `Client → ${session.info?.serverUrl}`}
-    · <button class="underline" onclick={onreset}>Ubah mode</button>
   </div>
 </div>

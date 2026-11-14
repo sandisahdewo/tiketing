@@ -4,7 +4,7 @@
   import FormAlert from '../components/FormAlert.svelte'
   import { FormState, required, maxLength, username as usernameRule } from '../lib/form.svelte'
 
-  let { ondone }: { ondone: () => void } = $props()
+  let { ondone, onreset }: { ondone: () => void; onreset: () => void } = $props()
 
   let username = $state('admin')
   let fullName = $state('')
@@ -37,6 +37,10 @@
   <form class="card w-full max-w-md p-8" onsubmit={save} novalidate>
     <h1 class="text-2xl font-bold text-brand-700">Buat Akun Admin</h1>
     <p class="mt-1 text-sm text-slate-500">Belum ada pengguna. Buat akun admin pertama untuk mengelola tiket, pengguna, dan laporan.</p>
+    <p class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      Komputer ini diatur sebagai <b>Server</b>. Kalau seharusnya terhubung ke komputer lain,
+      <button type="button" class="font-semibold underline" onclick={onreset}>ubah mode</button> ke Client.
+    </p>
     <div class="mt-6 space-y-4">
       <FormAlert message={form.general} />
       <Field label="Username" id="u" {form} name="username" hint="3-32 karakter: huruf kecil, angka, titik, minus, garis bawah">

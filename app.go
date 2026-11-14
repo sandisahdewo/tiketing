@@ -23,6 +23,7 @@ import (
 	"tiket/internal/applog"
 	"tiket/internal/config"
 	"tiket/internal/db"
+	"tiket/internal/discover"
 	"tiket/internal/export"
 	"tiket/internal/model"
 	"tiket/internal/printer"
@@ -146,6 +147,7 @@ func (a *App) startServer() error {
 		slog.Warn("BackupHarian", "error", err.Error())
 	}
 	local := service.NewLocal(store.New(conn), appVersion)
+	local.Name = deviceName()
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", a.cfg.Port))
 	if err != nil {
 		conn.Close()
@@ -236,20 +238,8 @@ func (a *App) record(op, action string, err error, attrs ...any) {
 
 func lanAddresses() []string {
 	var out []string
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return out
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
-				out = append(out, ipnet.IP.String())
-			}
-		}
+	for _, n := range discover.Networks() {
+		out = append(out, n.IP.String())
 	}
 	return out
 }
@@ -325,6 +315,25 @@ func (a *App) TestServer(serverURL string) (st model.Status, err error) {
 	return st, nil
 }
 
+// FindServers looks for the Tiket server on this PC's networks, so the setup
+// of a client can offer it instead of asking for its address. Only the
+// default port is searched; a server on another port is typed in.
+func (a *App) FindServers() []discover.Server {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	nets := discover.Networks()
+	found := discover.Find(ctx, nets, config.DefaultPort, appVersion)
+	var searched, addresses []string
+	for _, n := range nets {
+		searched = append(searched, n.String())
+	}
+	for _, s := range found {
+		addresses = append(addresses, s.Address)
+	}
+	applog.Action("FindServers", nil, "networks", strings.Join(searched, " "), "found", strings.Join(addresses, " "))
+	return found
+}
+
 // SetupClient connects this PC to a server. Its counter is then chosen by an
 // admin in Pengaturan.
 func (a *App) SetupClient(serverURL string) (err error) {
@@ -343,17 +352,31 @@ func (a *App) SetupClient(serverURL string) (err error) {
 	return config.Save(a.dataDir, a.cfg)
 }
 
+// ResetSetup returns this PC to the first setup. An admin may always do it.
+// Without a login it is only allowed on a PC that is not in use: the app did
+// not start, the server cannot be reached, or the server has no users yet.
 func (a *App) ResetSetup() (err error) {
 	a.mu.Lock()
+	user, svc := a.user, a.svc
+	a.mu.Unlock()
+	name := "-"
+	if user != nil {
+		name = user.Username
+	}
+	defer func() { applog.Action("ResetSetup", err, "user", name) }()
+	switch {
+	case user != nil:
+		if user.Role != model.RoleAdmin {
+			return model.ErrForbidden
+		}
+	case svc != nil:
+		// Asked outside the lock: a server that is off answers slowly.
+		if st, err := svc.Status(); err == nil && st.HasUsers {
+			return model.ErrForbidden
+		}
+	}
+	a.mu.Lock()
 	defer a.mu.Unlock()
-	user := "-"
-	if a.user != nil {
-		user = a.user.Username
-	}
-	defer func() { applog.Action("ResetSetup", err, "user", user) }()
-	if a.user != nil && a.user.Role != model.RoleAdmin {
-		return model.ErrForbidden
-	}
 	a.deactivate()
 	a.cfg.Mode = ""
 	a.startErr = ""

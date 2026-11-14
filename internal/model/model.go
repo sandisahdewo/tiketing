@@ -524,7 +524,9 @@ type AssignCounterInput struct {
 }
 
 type Status struct {
-	Version  string `json:"version"`
+	Version string `json:"version"`
+	// Name is the server's computer name ("" from servers that do not send it).
+	Name     string `json:"name"`
 	HasUsers bool   `json:"hasUsers"`
 }
 

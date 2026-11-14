@@ -67,6 +67,8 @@ type Local struct {
 	Store    *store.Store
 	Sessions *auth.Sessions
 	Version  string
+	// Name is this PC's computer name, shown to a client that connects.
+	Name string
 }
 
 func NewLocal(st *store.Store, version string) *Local {
@@ -99,7 +101,7 @@ func (l *Local) user(token string, roles ...string) (model.User, error) {
 
 func (l *Local) Status() (model.Status, error) {
 	n, err := l.Store.CountUsers()
-	return model.Status{Version: l.Version, HasUsers: n > 0}, err
+	return model.Status{Version: l.Version, Name: l.Name, HasUsers: n > 0}, err
 }
 
 func (l *Local) CreateFirstAdmin(in model.UserInput) error {

@@ -63,16 +63,18 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-func setup(t *testing.T, svc Service) (admin, kasir string) {
+// setup fills a fresh database and logs in through svc. The first admin is
+// made on local, the server itself: it cannot be made over the network.
+func setup(t *testing.T, local *Local, svc Service) (admin, kasir string) {
 	t.Helper()
 	st := must(svc.Status())
 	if st.HasUsers {
 		t.Fatal("fresh db should have no users")
 	}
-	if err := svc.CreateFirstAdmin(model.UserInput{Username: "Admin", FullName: "Pak Admin", Password: "rahasia"}); err != nil {
+	if err := local.CreateFirstAdmin(model.UserInput{Username: "Admin", FullName: "Pak Admin", Password: "rahasia"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.CreateFirstAdmin(model.UserInput{Username: "admin2", FullName: "X", Password: "rahasia"}); err == nil {
+	if err := local.CreateFirstAdmin(model.UserInput{Username: "admin2", FullName: "X", Password: "rahasia"}); err == nil {
 		t.Fatal("second first-admin should fail")
 	}
 	admin = must(svc.Login("admin", "rahasia")).Token
@@ -121,8 +123,8 @@ func closeShift(t *testing.T, svc Service, token string, id int64) model.ShiftCl
 	return must(svc.CloseShift(token, model.CloseShiftInput{ShiftID: id, ActualCash: r.ExpectedCash}))
 }
 
-func exercise(t *testing.T, svc Service, c *clock) {
-	admin, kasir := setup(t, svc)
+func exercise(t *testing.T, local *Local, svc Service, c *clock) {
+	admin, kasir := setup(t, local, svc)
 
 	if _, err := svc.Login("budi", "salah"); err == nil {
 		t.Fatal("wrong password accepted")
@@ -363,14 +365,36 @@ func exercise(t *testing.T, svc Service, c *clock) {
 
 func TestLocal(t *testing.T) {
 	local, c := newLocal(t)
-	exercise(t, local, c)
+	exercise(t, local, local, c)
 }
 
 func TestRemoteRoundTrip(t *testing.T) {
 	local, c := newLocal(t)
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
-	exercise(t, NewRemote(srv.URL, "1.2.5"), c)
+	exercise(t, local, NewRemote(srv.URL, "1.2.5"), c)
+}
+
+// A PC on the network cannot make itself the admin of a server that has no
+// users yet.
+func TestRemoteFirstAdminRefused(t *testing.T) {
+	local, _ := newLocal(t)
+	local.Name = "PC-SERVER"
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	remote := NewRemote(srv.URL, testVersion)
+	err := remote.CreateFirstAdmin(model.UserInput{Username: "admin", FullName: "A", Password: "rahasia"})
+	var ve *model.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	st := must(remote.Status())
+	if st.HasUsers {
+		t.Error("the refused request made a user")
+	}
+	if st.Name != "PC-SERVER" {
+		t.Errorf("status name = %q", st.Name)
+	}
 }
 
 func TestRemoteVersionMismatch(t *testing.T) {
@@ -396,7 +420,7 @@ func TestRemoteUnreachable(t *testing.T) {
 
 func TestTopupCategory(t *testing.T) {
 	svc, _ := newLocal(t)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, svc, svc)
 
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry Weekday", Price: 3500000}))
 	if entry.Category != model.CategoryTicket || entry.Color != model.DefaultColor {
@@ -449,7 +473,7 @@ func TestKasirReportAndDeleteSale(t *testing.T) {
 	defer srv.Close()
 	// Goes through the HTTP server so the new route and remote client are covered too.
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	sell := func(token string, qty int64) model.Sale {
 		onShift(t, svc, admin, token, testDevice)
@@ -525,7 +549,7 @@ func TestLoggedOpSessionAndPayload(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewLogged(NewRemote(srv.URL, testVersion))
-	admin, _ := setup(t, svc)
+	admin, _ := setup(t, local, svc)
 
 	buf.Reset()
 	if _, err := svc.SaveUser(admin, model.UserInput{Username: "x", FullName: "X", Role: model.RoleKasir, Password: "rahasia"}); err == nil {
@@ -571,7 +595,7 @@ func TestTicketActive(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
@@ -628,7 +652,7 @@ func TestSearchSales(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup 50%", Price: 5000000, Category: model.CategoryTopup}))
 
@@ -686,7 +710,7 @@ func TestSearchTickets(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 
 	var ids []int64
 	for i := 0; i < 12; i++ {
@@ -744,7 +768,7 @@ func TestSorting(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 
 	cheap := must(svc.SaveTicket(admin, model.TicketInput{Name: "b murah", Price: 100000}))
 	pricey := must(svc.SaveTicket(admin, model.TicketInput{Name: "A mahal", Price: 900000}))
@@ -824,7 +848,7 @@ func TestReportFilter(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
 	sitiToken := must(svc.Login("siti", "1234")).Token
 
@@ -920,7 +944,7 @@ func TestCounters(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc) // pc-test has LOKET 1 (code 1)
+	admin, kasir := setup(t, local, svc) // pc-test has LOKET 1 (code 1)
 	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	sell := func(device string) (model.Sale, error) {
 		return svc.CreateSale(kasir, model.SaleInput{DeviceID: device, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, Paid: 1000000})
@@ -1022,7 +1046,7 @@ func TestShifts(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc) // pc-test has LOKET 1
+	admin, kasir := setup(t, local, svc) // pc-test has LOKET 1
 	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
 	sitiToken := must(svc.Login("siti", "1234")).Token
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
@@ -1248,7 +1272,7 @@ func TestShiftFilterDate(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 	siti := must(svc.SaveUser(admin, model.UserInput{Username: "siti", FullName: "Siti", Role: model.RoleKasir, Password: "1234"}))
 	sitiToken := must(svc.Login("siti", "1234")).Token
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
@@ -1325,7 +1349,7 @@ func TestSaleCorrection(t *testing.T) {
 	srv := httptest.NewServer(server.Handler(local, testVersion))
 	defer srv.Close()
 	svc := NewRemote(srv.URL, testVersion)
-	admin, kasir := setup(t, svc)
+	admin, kasir := setup(t, local, svc)
 	entry := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
 	topup := must(svc.SaveTicket(admin, model.TicketInput{Name: "Topup", Price: 5000000, Category: model.CategoryTopup}))
 	useCounter(t, svc, admin, "pc-2", "LOKET 2", "2")

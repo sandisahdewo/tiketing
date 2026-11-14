@@ -88,8 +88,11 @@ Uji mode client di satu PC: jalankan instance kedua dengan folder data lain, mis
 1. **PC Server:** pasang, pilih **Server**, buat akun admin, isi tiket. Catat alamat yang muncul di Pengaturan (misalnya `192.168.1.10:8787`).
    - Beri **IP statis** pada PC server (lewat router atau Windows).
    - Saat pertama jalan, Windows Firewall akan bertanya. Pilih **Allow** untuk jaringan *Private*.
-2. **PC Client:** pasang, pilih **Client**, isi alamat server, klik *Tes koneksi*.
+2. **PC Client:** pasang, pilih **Client**, lalu pilih server dari daftar *Server di jaringan ini* (dicari otomatis di port 8787; nama komputer server ikut tampil). Kalau server tidak muncul, layar itu menampilkan hal yang perlu diperiksa; alamat server juga bisa diisi sendiri lalu *Tes koneksi*.
+   - Akun admin pertama hanya bisa dibuat di PC server. Client yang terhubung ke server tanpa pengguna menampilkan peringatan, bukan form.
 3. **Printer:** di Pengaturan setiap PC, pilih printer thermal (driver Windows sudah terpasang), pilih lebar kertas, lalu klik *Cetak Tes*.
+
+Mode Server/Client diubah oleh admin lewat menu Pengaturan. Tanpa login, *Ubah mode* hanya muncul selama PC belum dipakai: aplikasi gagal menyala, client tidak bisa terhubung ke server, atau server belum punya pengguna.
 
 PC server harus menyala selama client dipakai. Sesi login tersimpan di memori server, jadi setelah server di-restart, semua kasir perlu login ulang.
 

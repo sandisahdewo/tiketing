@@ -183,8 +183,10 @@ func Handler(svc service.Service, serverVersion string) http.Handler {
 		})
 	}
 
-	route("createFirstAdmin", call(func(_ string, in model.UserInput) (any, error) {
-		return Empty{}, svc.CreateFirstAdmin(in)
+	// The first admin is made on the server PC itself, so another PC on the
+	// network cannot take over a server that has no users yet.
+	route("createFirstAdmin", call(func(_ string, _ model.UserInput) (any, error) {
+		return nil, model.Invalid("Akun admin pertama hanya bisa dibuat di komputer server")
 	}))
 	route("login", call(func(_ string, in LoginRequest) (any, error) {
 		return svc.Login(in.Username, in.Password)

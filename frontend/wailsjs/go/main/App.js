@@ -66,6 +66,10 @@ export function ExportReport(arg1, arg2) {
   return window['go']['main']['App']['ExportReport'](arg1, arg2);
 }
 
+export function FindServers() {
+  return window['go']['main']['App']['FindServers']();
+}
+
 export function GetAppInfo() {
   return window['go']['main']['App']['GetAppInfo']();
 }

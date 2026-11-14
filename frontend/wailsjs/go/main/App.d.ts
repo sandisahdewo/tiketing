@@ -3,6 +3,7 @@
 import {updater} from '../models';
 import {main} from '../models';
 import {model} from '../models';
+import {discover} from '../models';
 
 export function ApplyUpdate():Promise<void>;
 
@@ -35,6 +36,8 @@ export function DeleteUser(arg1:number):Promise<void>;
 export function DownloadLogs():Promise<string>;
 
 export function ExportReport(arg1:main.ReportTab,arg2:string):Promise<string>;
+
+export function FindServers():Promise<Array<discover.Server>>;
 
 export function GetAppInfo():Promise<main.AppInfo>;
 

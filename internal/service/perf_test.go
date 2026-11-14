@@ -25,7 +25,7 @@ import (
 func TestPerf(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	local, c := newLocal(t)
-	admin, kasir := setup(t, local)
+	admin, kasir := setup(t, local, local)
 	rng := rand.New(rand.NewSource(1))
 
 	// --- seed -------------------------------------------------------------

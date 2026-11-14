@@ -1,3 +1,28 @@
+export namespace discover {
+	
+	export class Server {
+	    address: string;
+	    name: string;
+	    version: string;
+	    hasUsers: boolean;
+	    compatible: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Server(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.address = source["address"];
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.hasUsers = source["hasUsers"];
+	        this.compatible = source["compatible"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class AppInfo {
@@ -919,6 +944,7 @@ export namespace model {
 	}
 	export class Status {
 	    version: string;
+	    name: string;
 	    hasUsers: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -928,6 +954,7 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
+	        this.name = source["name"];
 	        this.hasUsers = source["hasUsers"];
 	    }
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -274,5 +275,49 @@ func TestRestoreDatabase(t *testing.T) {
 	}
 	if err := a.RestoreDatabase(); err != model.ErrForbidden {
 		t.Errorf("kasir restore: %v", err)
+	}
+}
+
+// Without a login the setup can only be redone on a PC that is not in use.
+func TestResetSetup(t *testing.T) {
+	a := NewApp(t.TempDir())
+	defer a.deactivate()
+	start := func(cfg config.Config) {
+		t.Helper()
+		a.cfg = cfg
+		if err := a.activate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := config.Config{Mode: config.ModeServer, Port: 0}
+
+	start(server)
+	if err := a.ResetSetup(); err != nil {
+		t.Fatalf("server without users: %v", err)
+	}
+	if a.cfg.Mode != "" || a.svc != nil {
+		t.Fatal("reset left the server running")
+	}
+
+	start(server)
+	if err := a.CreateFirstAdmin(model.UserInput{Username: "admin", FullName: "Admin", Password: "rahasia"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ResetSetup(); !errors.Is(err, model.ErrForbidden) {
+		t.Fatalf("server with users and nobody logged in: want forbidden, got %v", err)
+	}
+	if a.cfg.Mode != config.ModeServer || a.svc == nil {
+		t.Fatal("refused reset stopped the server")
+	}
+	if _, err := a.Login("admin", "rahasia"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ResetSetup(); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+
+	start(config.Config{Mode: config.ModeClient, ServerURL: "http://127.0.0.1:1"})
+	if err := a.ResetSetup(); err != nil {
+		t.Fatalf("client that cannot reach its server: %v", err)
 	}
 }

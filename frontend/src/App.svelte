@@ -10,10 +10,11 @@
   import { session } from './lib/session.svelte'
   import { watchUpdates } from './lib/update.svelte'
 
-  type Screen = 'loading' | 'setup' | 'error' | 'first-admin' | 'login' | 'main'
+  type Screen = 'loading' | 'setup' | 'error' | 'first-admin' | 'no-admin' | 'login' | 'main'
 
   let screen = $state<Screen>('loading')
   let error = $state('')
+  let serverName = $state('')
   let confirmReset = $state(false)
 
   async function boot() {
@@ -32,7 +33,10 @@
       }
       const status = await App.Status()
       if (!status.hasUsers) {
-        screen = 'first-admin'
+        // The first admin is made on the server PC. A client only says so:
+        // it may be pointing at the wrong PC.
+        serverName = status.name || ''
+        screen = session.info.mode === 'client' ? 'no-admin' : 'first-admin'
         return
       }
       session.user = await App.CurrentUser()
@@ -49,6 +53,8 @@
     if (resetting) return
     resetting = true
     confirmReset = false
+    // A client asks its server first, which takes a while when it is off.
+    screen = 'loading'
     try {
       await App.ResetSetup()
       session.user = null
@@ -96,9 +102,24 @@
     </div>
   </div>
 {:else if screen === 'first-admin'}
-  <FirstAdmin ondone={boot} />
+  <FirstAdmin ondone={boot} onreset={() => (confirmReset = true)} />
+{:else if screen === 'no-admin'}
+  <div class="flex h-full items-center justify-center p-6">
+    <div class="card w-full max-w-lg p-8">
+      <h1 class="text-xl font-bold text-amber-700">Server belum punya akun admin</h1>
+      <p class="mt-3 text-slate-700">
+        Komputer ini Client dari server <b class="font-mono">{session.info?.serverUrl}</b>{serverName ? ` (${serverName})` : ''}.
+        Server itu belum punya pengguna.
+      </p>
+      <p class="mt-2 text-slate-700">Buat akun admin di komputer server, atau periksa apakah alamatnya benar.</p>
+      <div class="mt-6 flex gap-2">
+        <button class="btn btn-primary" onclick={boot}>Coba lagi</button>
+        <button class="btn btn-secondary" onclick={() => (confirmReset = true)}>Ubah mode server/client</button>
+      </div>
+    </div>
+  </div>
 {:else if screen === 'login'}
-  <Login onlogin={() => (screen = 'main')} onreset={() => (confirmReset = true)} />
+  <Login onlogin={() => (screen = 'main')} onlost={boot} />
 {:else}
   <Shell onlogout={() => (screen = 'login')} onreset={boot} />
 {/if}
