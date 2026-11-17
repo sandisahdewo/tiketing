@@ -76,6 +76,7 @@ go test ./internal/...                # tes backend
 cd frontend && npm run check          # cek tipe Svelte/TS
 wails build -tags webkit2_41          # build Linux
 wails build -platform windows/amd64   # build tiket.exe untuk Windows dari Linux
+e2e/run.sh                            # tes e2e pembayaran di kasir (lihat e2e/README.md)
 ```
 
 Di Linux, "printer" menyimpan hasil cetak sebagai file `.bin` ESC/POS di `<folder data>/print-out/`.
