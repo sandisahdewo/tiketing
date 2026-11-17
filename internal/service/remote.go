@@ -53,7 +53,9 @@ type remoteError struct {
 func (r *Remote) do(req *http.Request, out any) error {
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		return fmt.Errorf("Tidak bisa terhubung ke server %s. Pastikan PC server menyala dan satu jaringan.", r.BaseURL)
+		// The page recognises this error by how it starts
+		// (frontend/src/lib/connection.svelte.ts); keep the two the same.
+		return fmt.Errorf("Tidak bisa terhubung ke server %s. Pastikan PC server menyala, aplikasi Tiket di sana terbuka, dan kedua PC di jaringan yang sama.", r.BaseURL)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {

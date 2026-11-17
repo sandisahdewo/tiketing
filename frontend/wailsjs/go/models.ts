@@ -496,6 +496,7 @@ export namespace model {
 	    replacesSaleId: number;
 	    replacesInvoiceNo: string;
 	    replacedByInvoiceNo: string;
+	    repeated: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Sale(source);
@@ -524,6 +525,7 @@ export namespace model {
 	        this.replacesSaleId = source["replacesSaleId"];
 	        this.replacesInvoiceNo = source["replacesInvoiceNo"];
 	        this.replacedByInvoiceNo = source["replacedByInvoiceNo"];
+	        this.repeated = source["repeated"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

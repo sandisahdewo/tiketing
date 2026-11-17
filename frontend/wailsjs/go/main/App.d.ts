@@ -11,6 +11,8 @@ export function BackupDatabase():Promise<string>;
 
 export function CancelRestore():Promise<void>;
 
+export function CheckSession():Promise<void>;
+
 export function CheckUpdate():Promise<updater.Info>;
 
 export function ChooseLogo():Promise<boolean>;
@@ -19,11 +21,11 @@ export function ChooseRestoreFile():Promise<main.RestoreInfo>;
 
 export function CloseShift(arg1:model.CloseShiftInput):Promise<model.ShiftClosing>;
 
-export function CorrectSale(arg1:number,arg2:string,arg3:Array<model.SaleItemInput>,arg4:number):Promise<model.Sale>;
+export function CorrectSale(arg1:number,arg2:string,arg3:Array<model.SaleItemInput>,arg4:number,arg5:string):Promise<model.Sale>;
 
 export function CreateFirstAdmin(arg1:model.UserInput):Promise<void>;
 
-export function CreateSale(arg1:Array<model.SaleItemInput>,arg2:number):Promise<model.Sale>;
+export function CreateSale(arg1:Array<model.SaleItemInput>,arg2:number,arg3:string):Promise<model.Sale>;
 
 export function CurrentUser():Promise<model.User>;
 
@@ -37,7 +39,7 @@ export function DownloadLogs():Promise<string>;
 
 export function ExportReport(arg1:main.ReportTab,arg2:string):Promise<string>;
 
-export function FindServers():Promise<Array<discover.Server>>;
+export function FindServers(arg1:string):Promise<Array<discover.Server>>;
 
 export function GetAppInfo():Promise<main.AppInfo>;
 
@@ -113,6 +115,8 @@ export function SearchSales(arg1:model.SalePageQuery):Promise<model.SalePage>;
 
 export function SearchTickets(arg1:model.TicketQuery):Promise<model.TicketPage>;
 
+export function ServerReachable():Promise<boolean>;
+
 export function SetCounterActive(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetShiftTypeActive(arg1:number,arg2:boolean):Promise<void>;
@@ -130,6 +134,8 @@ export function ShiftDay(arg1:string):Promise<model.ShiftDay>;
 export function ShiftDayPreview(arg1:string):Promise<main.ReceiptView>;
 
 export function ShiftStatus():Promise<model.ShiftStatus>;
+
+export function StartupStage():Promise<string>;
 
 export function Status():Promise<model.Status>;
 

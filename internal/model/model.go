@@ -123,6 +123,9 @@ type SaleInput struct {
 	Paid           int64           `json:"paid"`
 	ReplacesSaleID int64           `json:"replacesSaleId"`
 	Reason         string          `json:"reason"`
+	// RequestID is the number the sending PC gave this sale ("" for none).
+	// A second sale with the same number is not made; see Sale.Repeated.
+	RequestID string `json:"requestId"`
 }
 
 type SaleItem struct {
@@ -165,6 +168,10 @@ type Sale struct {
 	ReplacesSaleID      int64  `json:"replacesSaleId"`
 	ReplacesInvoiceNo   string `json:"replacesInvoiceNo"`
 	ReplacedByInvoiceNo string `json:"replacedByInvoiceNo"`
+
+	// Repeated is set on the answer to a sale that was sent before with the
+	// same RequestID: this is the sale recorded then, and nothing was added.
+	Repeated bool `json:"repeated"`
 }
 
 type SaleQuery struct {

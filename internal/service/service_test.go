@@ -2,7 +2,9 @@ package service_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"tiket/internal/applog"
+	"tiket/internal/auth"
 	"tiket/internal/db"
 	"tiket/internal/model"
 	"tiket/internal/server"
@@ -415,6 +418,122 @@ func TestRemoteUnreachable(t *testing.T) {
 	remote := NewRemote("127.0.0.1:1", testVersion)
 	if _, err := remote.Status(); err == nil {
 		t.Fatal("expected connection error")
+	}
+}
+
+// A sale that is sent again with the same request number (the first answer
+// got lost) is not recorded twice: the server reports the one it has.
+func TestRepeatedSale(t *testing.T) {
+	local, _ := newLocal(t)
+	srv := httptest.NewServer(server.Handler(local, testVersion))
+	defer srv.Close()
+	svc := NewRemote(srv.URL, testVersion)
+	admin, kasir := setup(t, local, svc)
+	tk := must(svc.SaveTicket(admin, model.TicketInput{Name: "Entry", Price: 1000000}))
+	onShift(t, svc, admin, kasir, testDevice)
+	sell := func(request string) model.Sale {
+		t.Helper()
+		return must(svc.CreateSale(kasir, model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: 2}}, Paid: 2000000, RequestID: request}))
+	}
+	count := func() int {
+		t.Helper()
+		return len(must(svc.ListSales(kasir, model.SaleQuery{})))
+	}
+
+	first := sell("req-1")
+	if first.Repeated {
+		t.Fatal("a new sale is reported as repeated")
+	}
+	again := sell("req-1")
+	if !again.Repeated || again.ID != first.ID || again.InvoiceNo != first.InvoiceNo || len(again.Items) != 1 {
+		t.Fatalf("sent again: %+v, want sale %d reported as repeated", again, first.ID)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("%d sales after sending one twice", n)
+	}
+	// The cashier decides to record it anyway: another number, another sale.
+	if other := sell("req-2"); other.Repeated || other.ID == first.ID {
+		t.Fatalf("another request number: %+v", other)
+	}
+	// Without a number nothing is compared.
+	if a, b := sell(""), sell(""); a.Repeated || b.Repeated || a.ID == b.ID {
+		t.Fatal("sales without a request number were taken for one")
+	}
+	if n := count(); n != 4 {
+		t.Fatalf("%d sales, want 4", n)
+	}
+
+	// A correction that is sent again reports the corrected sale; the first
+	// time already deleted the old one.
+	fix := model.SaleInput{DeviceID: testDevice, Items: []model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, Paid: 1000000,
+		ReplacesSaleID: first.ID, Reason: "salah jumlah", RequestID: "req-fix"}
+	corrected := must(svc.CreateSale(admin, fix))
+	repeated := must(svc.CreateSale(admin, fix))
+	if corrected.Repeated || !repeated.Repeated || repeated.ID != corrected.ID {
+		t.Fatalf("correction sent again: %+v", repeated)
+	}
+}
+
+// A login outlives the app on the server PC, and ends after a day without
+// use or when the admin changes the password.
+func TestSessions(t *testing.T) {
+	local, _ := newLocal(t)
+	now := time.Date(2026, 11, 16, 8, 0, 0, 0, time.Local)
+	clock := func() time.Time { return now }
+	local.Sessions = auth.NewSessions(local.Store, clock)
+	admin, kasir := setup(t, local, local)
+
+	// The app is closed and opened again: a new service on the same database.
+	reopened := NewLocal(local.Store, testVersion)
+	reopened.Sessions = auth.NewSessions(local.Store, clock)
+	if u, err := reopened.Me(kasir); err != nil || u.Username != "budi" {
+		t.Fatalf("session after reopening: %v %v", u.Username, err)
+	}
+	var plain int
+	if err := local.Store.DB.QueryRow("SELECT COUNT(*) FROM sessions WHERE token_hash = ?", kasir).Scan(&plain); err != nil || plain != 0 {
+		t.Errorf("the database holds the token itself (%d, %v)", plain, err)
+	}
+
+	// Each use extends it by a day.
+	for range 3 {
+		now = now.Add(23 * time.Hour)
+		if _, err := reopened.Me(kasir); err != nil {
+			t.Fatalf("session used within a day: %v", err)
+		}
+	}
+	now = now.Add(25 * time.Hour)
+	if _, err := reopened.Me(kasir); !errors.Is(err, model.ErrUnauthorized) {
+		t.Fatalf("session unused for over a day: %v", err)
+	}
+	// The admin was last seen even longer ago.
+	if _, err := reopened.Me(admin); !errors.Is(err, model.ErrUnauthorized) {
+		t.Fatalf("admin session unused for days: %v", err)
+	}
+
+	admin = must(reopened.Login("admin", "rahasia")).Token
+	kasir = must(reopened.Login("budi", "1234")).Token
+	var rows int
+	if err := local.Store.DB.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&rows); err != nil || rows != 2 {
+		t.Errorf("sessions kept = %d (%v), want only the two new logins", rows, err)
+	}
+	budi := must(reopened.Me(kasir))
+	must(reopened.SaveUser(admin, model.UserInput{ID: budi.ID, Username: budi.Username, FullName: budi.FullName, Role: budi.Role, Password: "baru1"}))
+	if _, err := reopened.Me(kasir); !errors.Is(err, model.ErrUnauthorized) {
+		t.Fatalf("session after the admin changed the password: %v", err)
+	}
+	if err := reopened.Logout(admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Me(admin); !errors.Is(err, model.ErrUnauthorized) {
+		t.Fatalf("session after logout: %v", err)
+	}
+	// A renewal that was under way during the logout does not bring it back.
+	sum := sha256.Sum256([]byte(admin))
+	if err := local.Store.RenewSession(hex.EncodeToString(sum[:]), now.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Me(admin); !errors.Is(err, model.ErrUnauthorized) {
+		t.Fatalf("session renewed after logout: %v", err)
 	}
 }
 

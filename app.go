@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/browser"
@@ -47,6 +48,14 @@ type App struct {
 	conn     *sql.DB
 	httpSrv  *http.Server
 	startErr string
+	// started is closed when startup is done. Wails runs startup while the
+	// page loads, and opening the database takes a moment.
+	started chan struct{}
+	// stage is what the app is doing while it starts, for the loading screen.
+	stage atomic.Value
+	// forgetSessions makes the next start of the server drop every login: a
+	// restored backup carries the sessions of the moment it was made.
+	forgetSessions bool
 
 	token string
 	user  *model.User
@@ -77,11 +86,32 @@ type AppInfo struct {
 }
 
 func NewApp(dataDir string) *App {
-	return &App{dataDir: dataDir}
+	return &App{dataDir: dataDir, started: make(chan struct{})}
+}
+
+// stageEvent tells the page that the app went on to another step of starting.
+const stageEvent = "startup-stage"
+
+// setStage says what the app is doing while it starts.
+func (a *App) setStage(text string) {
+	a.stage.Store(text)
+	if a.ctx != nil {
+		wruntime.EventsEmit(a.ctx, stageEvent, text)
+	}
+}
+
+// StartupStage is what the app is doing right now while it starts ("" when
+// it is not starting). Later steps arrive as stageEvent.
+func (a *App) StartupStage() string {
+	text, _ := a.stage.Load().(string)
+	return text
 }
 
 func (a *App) startup(ctx context.Context) {
+	defer close(a.started)
+	defer a.stage.Store("")
 	a.ctx = ctx
+	a.setStage("Membaca pengaturan…")
 	cfg, err := config.Load(a.dataDir)
 	if err != nil {
 		a.startErr = "Gagal membaca konfigurasi: " + err.Error()
@@ -128,6 +158,8 @@ func (a *App) dbPath() string    { return filepath.Join(a.dataDir, "tiket.db") }
 func (a *App) backupDir() string { return filepath.Join(a.dataDir, "backups") }
 
 func (a *App) startServer() error {
+	defer a.stage.Store("")
+	a.setStage("Membuka database…")
 	conn, err := db.Open(a.dbPath())
 	if err != nil {
 		return fmt.Errorf("Gagal membuka database: %w", err)
@@ -135,6 +167,7 @@ func (a *App) startServer() error {
 	backupDir := a.backupDir()
 	// Checked copies of an unfinished restore are not needed any more.
 	os.RemoveAll(a.restoreWorkDir())
+	a.setStage("Memeriksa database…")
 	if err := db.Migrate(conn, backupDir); err != nil {
 		conn.Close()
 		return fmt.Errorf("Gagal migrasi database: %w", err)
@@ -143,11 +176,20 @@ func (a *App) startServer() error {
 		conn.Close()
 		return fmt.Errorf("%w. Data tidak diubah; file database: %s", err, a.dbPath())
 	}
+	if a.forgetSessions {
+		if err := store.New(conn).DeleteAllSessions(); err != nil {
+			conn.Close()
+			return fmt.Errorf("Gagal menghapus sesi login lama: %w", err)
+		}
+		a.forgetSessions = false
+	}
+	a.setStage("Membuat backup harian…")
 	if err := db.BackupDaily(conn, backupDir); err != nil {
 		slog.Warn("BackupHarian", "error", err.Error())
 	}
 	local := service.NewLocal(store.New(conn), appVersion)
 	local.Name = deviceName()
+	a.setStage("Menyalakan server…")
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", a.cfg.Port))
 	if err != nil {
 		conn.Close()
@@ -253,7 +295,10 @@ func deviceName() string {
 	return strings.ToUpper(name)
 }
 
+// GetAppInfo is the first thing the page asks. It waits for startup, so the
+// page does not take an app that is still starting for one that failed.
 func (a *App) GetAppInfo() AppInfo {
+	<-a.started
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	printerName := a.cfg.PrinterName
@@ -317,12 +362,18 @@ func (a *App) TestServer(serverURL string) (st model.Status, err error) {
 
 // FindServers looks for the Tiket server on this PC's networks, so the setup
 // of a client can offer it instead of asking for its address. Only the
-// default port is searched; a server on another port is typed in.
-func (a *App) FindServers() []discover.Server {
+// default port is searched; a server on another port is typed in. current is
+// the address in the field (saved earlier or typed): it is asked too, so a
+// server that still answers there stays in the list.
+func (a *App) FindServers(current string) []discover.Server {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	nets := discover.Networks()
-	found := discover.Find(ctx, nets, config.DefaultPort, appVersion)
+	also := strings.TrimPrefix(service.NormalizeServerURL(current), "http://")
+	if strings.Contains(also, "://") {
+		also = ""
+	}
+	found := discover.Find(ctx, nets, config.DefaultPort, appVersion, also)
 	var searched, addresses []string
 	for _, n := range nets {
 		searched = append(searched, n.String())
@@ -381,6 +432,19 @@ func (a *App) ResetSetup() (err error) {
 	a.cfg.Mode = ""
 	a.startErr = ""
 	return config.Save(a.dataDir, a.cfg)
+}
+
+// ServerReachable reports whether this client's server answers. The waiting
+// screen asks every few seconds, so unlike Status a failure is not logged.
+func (a *App) ServerReachable() bool {
+	a.mu.Lock()
+	mode, url := a.cfg.Mode, a.cfg.ServerURL
+	a.mu.Unlock()
+	if mode != config.ModeClient {
+		return true
+	}
+	_, err := service.NewRemote(url, appVersion).Status()
+	return err == nil
 }
 
 func (a *App) Status() (model.Status, error) {
@@ -534,6 +598,18 @@ func (a *App) Logout() error {
 	return nil
 }
 
+// CheckSession asks the server whether this login is still valid. The
+// cashier screen calls it when a transaction starts, so a session that ended
+// (or a server that is off) shows before the cart is filled, not at payment.
+func (a *App) CheckSession() error {
+	svc, token, err := a.service()
+	if err != nil {
+		return err
+	}
+	_, err = svc.Me(token)
+	return a.check(err)
+}
+
 func (a *App) CurrentUser() *model.User {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -627,7 +703,10 @@ func (a *App) DeleteUser(id int64) error {
 	return a.check(svc.DeleteUser(token, id))
 }
 
-func (a *App) CreateSale(items []model.SaleItemInput, paid int64) (model.Sale, error) {
+// CreateSale records a sale made at this PC. requestID is the number the
+// page gave this transaction; it stays the same when the cashier pays again
+// after an answer got lost, so the server can tell (model.Sale.Repeated).
+func (a *App) CreateSale(items []model.SaleItemInput, paid int64, requestID string) (model.Sale, error) {
 	svc, token, err := a.service()
 	if err != nil {
 		return model.Sale{}, err
@@ -635,13 +714,13 @@ func (a *App) CreateSale(items []model.SaleItemInput, paid int64) (model.Sale, e
 	a.mu.Lock()
 	dev := a.cfg.DeviceID
 	a.mu.Unlock()
-	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid})
+	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid, RequestID: requestID})
 	return out, a.check(err)
 }
 
 // CorrectSale replaces the sale saleID with a new one made at this PC: the
 // old sale is deleted with the reason in the same step the new one is saved.
-func (a *App) CorrectSale(saleID int64, reason string, items []model.SaleItemInput, paid int64) (model.Sale, error) {
+func (a *App) CorrectSale(saleID int64, reason string, items []model.SaleItemInput, paid int64, requestID string) (model.Sale, error) {
 	svc, token, err := a.service()
 	if err != nil {
 		return model.Sale{}, err
@@ -649,7 +728,7 @@ func (a *App) CorrectSale(saleID int64, reason string, items []model.SaleItemInp
 	a.mu.Lock()
 	dev := a.cfg.DeviceID
 	a.mu.Unlock()
-	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid, ReplacesSaleID: saleID, Reason: reason})
+	out, err := svc.CreateSale(token, model.SaleInput{DeviceID: dev, Items: items, Paid: paid, ReplacesSaleID: saleID, Reason: reason, RequestID: requestID})
 	return out, a.check(err)
 }
 
@@ -1075,7 +1154,10 @@ func (a *App) RestoreDatabase() (err error) {
 		}
 		return fmt.Errorf("Gagal mengganti database, data tidak berubah: %w", err)
 	}
-	if err := a.activate(); err != nil {
+	a.forgetSessions = true
+	err = a.activate()
+	a.forgetSessions = false
+	if err != nil {
 		a.deactivate()
 		if rbErr := db.Replace(a.dbPath(), safety); rbErr != nil {
 			a.startErr = "Restore gagal dan data lama tidak bisa dikembalikan otomatis. Backup ada di " + safety

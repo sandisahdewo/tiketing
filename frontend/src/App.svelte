@@ -9,13 +9,24 @@
   import { App, errorMessage } from './lib/api'
   import { session } from './lib/session.svelte'
   import { watchUpdates } from './lib/update.svelte'
+  import { unreachable } from './lib/connection.svelte'
+  import { EventsOn } from '../wailsjs/runtime/runtime'
 
-  type Screen = 'loading' | 'setup' | 'error' | 'first-admin' | 'no-admin' | 'login' | 'main'
+  type Screen = 'loading' | 'setup' | 'error' | 'waiting' | 'first-admin' | 'no-admin' | 'login' | 'main'
 
   let screen = $state<Screen>('loading')
   let error = $state('')
   let serverName = $state('')
+  // What the loading screen says is being done.
+  let stage = $state('')
   let confirmReset = $state(false)
+
+  // While the app itself starts (the database is opened, the server is
+  // turned on), it says what it is doing.
+  $effect(() => {
+    App.StartupStage().then((text) => (stage = stage || text), () => {})
+    return EventsOn('startup-stage', (text: string) => (stage = text))
+  })
 
   async function boot() {
     screen = 'loading'
@@ -31,7 +42,20 @@
         screen = 'error'
         return
       }
-      const status = await App.Status()
+      stage = session.info.mode === 'client' ? `Menghubungkan ke server ${session.info.serverUrl}…` : 'Memuat data…'
+      let status
+      try {
+        status = await App.Status()
+      } catch (e) {
+        // Any other answer (not Tiket at that address, a broken server) is
+        // an error to show, not something that passes by waiting.
+        if (session.info.mode !== 'client' || !unreachable(errorMessage(e))) throw e
+        // Usual right after the PC is turned on: the network is not up yet,
+        // or the app on the server PC is not open yet. Keep trying.
+        error = errorMessage(e)
+        screen = 'waiting'
+        return
+      }
       if (!status.hasUsers) {
         // The first admin is made on the server PC. A client only says so:
         // it may be pointing at the wrong PC.
@@ -47,6 +71,25 @@
     }
   }
 
+  // While waiting for the server, look again every few seconds and go on as
+  // soon as it answers.
+  $effect(() => {
+    if (screen !== 'waiting') return
+    let asking = false
+    const timer = setInterval(async () => {
+      if (asking) return
+      asking = true
+      try {
+        if ((await App.ServerReachable()) && screen === 'waiting') boot()
+      } catch {
+        // Asked again in a moment.
+      } finally {
+        asking = false
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  })
+
   let resetting = false
 
   async function resetSetup() {
@@ -54,6 +97,7 @@
     resetting = true
     confirmReset = false
     // A client asks its server first, which takes a while when it is off.
+    stage = 'Mengubah mode…'
     screen = 'loading'
     try {
       await App.ResetSetup()
@@ -87,7 +131,13 @@
 <UpdateBanner />
 <div class="min-h-0 flex-1">
 {#if screen === 'loading'}
-  <div class="flex h-full items-center justify-center text-slate-500">Memuat…</div>
+  <div class="flex h-full flex-col items-center justify-center gap-3 text-slate-500">
+    <svg class="h-8 w-8 animate-spin text-brand-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" class="opacity-25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+    </svg>
+    <p role="status">{stage || 'Memuat…'}</p>
+  </div>
 {:else if screen === 'setup'}
   <Setup ondone={boot} />
 {:else if screen === 'error'}
@@ -95,6 +145,18 @@
     <div class="card w-full max-w-lg p-8">
       <h1 class="text-xl font-bold text-red-700">Tidak bisa memulai aplikasi</h1>
       <p class="mt-3 text-slate-700">{error}</p>
+      <div class="mt-6 flex gap-2">
+        <button class="btn btn-primary" onclick={boot}>Coba lagi</button>
+        <button class="btn btn-secondary" onclick={() => (confirmReset = true)}>Ubah mode server/client</button>
+      </div>
+    </div>
+  </div>
+{:else if screen === 'waiting'}
+  <div class="flex h-full items-center justify-center p-6">
+    <div class="card w-full max-w-lg p-8">
+      <h1 class="text-xl font-bold text-amber-700">Menunggu server</h1>
+      <p class="mt-3 text-slate-700">{error}</p>
+      <p class="mt-2 text-sm text-slate-500">Aplikasi mencoba lagi sendiri setiap beberapa detik dan lanjut begitu server terhubung.</p>
       <div class="mt-6 flex gap-2">
         <button class="btn btn-primary" onclick={boot}>Coba lagi</button>
         <button class="btn btn-secondary" onclick={() => (confirmReset = true)}>Ubah mode server/client</button>

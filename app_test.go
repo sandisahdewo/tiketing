@@ -48,7 +48,7 @@ func TestReportPrint(t *testing.T) {
 	}
 	sell := func() model.Sale {
 		t.Helper()
-		sale, err := a.CreateSale([]model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, 1000000)
+		sale, err := a.CreateSale([]model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, 1000000, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +174,7 @@ func TestRestoreDatabase(t *testing.T) {
 	}
 	sell := func() {
 		t.Helper()
-		if _, err := a.CreateSale([]model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, 1000000); err != nil {
+		if _, err := a.CreateSale([]model.SaleItemInput{{TicketID: tk.ID, Qty: 1}}, 1000000, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

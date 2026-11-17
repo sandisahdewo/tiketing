@@ -72,6 +72,11 @@ func TestFind(t *testing.T) {
 		t.Errorf("another version should be listed as not compatible: %+v", got)
 	}
 
+	// The address this PC was set up with is asked too, whatever its port.
+	if got := Find(context.Background(), nil, 1, "1.2.0", "127.0.0.1:"+portText, ""); len(got) != 1 || got[0].Address != "127.0.0.1:"+portText {
+		t.Errorf("the saved address was not found: %+v", got)
+	}
+
 	// Another program on the port is not a server.
 	answer = `{"hello":"world"}`
 	if got := Find(context.Background(), nets, port, "1.2.0"); len(got) != 0 {

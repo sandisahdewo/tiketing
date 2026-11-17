@@ -14,6 +14,10 @@ export function CancelRestore() {
   return window['go']['main']['App']['CancelRestore']();
 }
 
+export function CheckSession() {
+  return window['go']['main']['App']['CheckSession']();
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
@@ -30,16 +34,16 @@ export function CloseShift(arg1) {
   return window['go']['main']['App']['CloseShift'](arg1);
 }
 
-export function CorrectSale(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['CorrectSale'](arg1, arg2, arg3, arg4);
+export function CorrectSale(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['CorrectSale'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function CreateFirstAdmin(arg1) {
   return window['go']['main']['App']['CreateFirstAdmin'](arg1);
 }
 
-export function CreateSale(arg1, arg2) {
-  return window['go']['main']['App']['CreateSale'](arg1, arg2);
+export function CreateSale(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateSale'](arg1, arg2, arg3);
 }
 
 export function CurrentUser() {
@@ -66,8 +70,8 @@ export function ExportReport(arg1, arg2) {
   return window['go']['main']['App']['ExportReport'](arg1, arg2);
 }
 
-export function FindServers() {
-  return window['go']['main']['App']['FindServers']();
+export function FindServers(arg1) {
+  return window['go']['main']['App']['FindServers'](arg1);
 }
 
 export function GetAppInfo() {
@@ -218,6 +222,10 @@ export function SearchTickets(arg1) {
   return window['go']['main']['App']['SearchTickets'](arg1);
 }
 
+export function ServerReachable() {
+  return window['go']['main']['App']['ServerReachable']();
+}
+
 export function SetCounterActive(arg1, arg2) {
   return window['go']['main']['App']['SetCounterActive'](arg1, arg2);
 }
@@ -252,6 +260,10 @@ export function ShiftDayPreview(arg1) {
 
 export function ShiftStatus() {
   return window['go']['main']['App']['ShiftStatus']();
+}
+
+export function StartupStage() {
+  return window['go']['main']['App']['StartupStage']();
 }
 
 export function Status() {

@@ -8,6 +8,7 @@
   import Reports from './Reports.svelte'
   import Settings from './Settings.svelte'
   import Modal from '../components/Modal.svelte'
+  import ServerAlert from '../components/ServerAlert.svelte'
   import ShiftReportModal from '../components/ShiftReportModal.svelte'
   import { App } from '../lib/api'
   import { session, isAdmin } from '../lib/session.svelte'
@@ -166,3 +167,6 @@
     {/snippet}
   </Modal>
 {/if}
+
+<!-- Last, so it is on top of every other popup. -->
+<ServerAlert />

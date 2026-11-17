@@ -200,6 +200,8 @@ var releasedMigrations = map[string]string{
 	"002_cash_closings.sql":    "6ee543c0a48d5797cd9131f892bde284842c0115877f9814baf6d236635b8596",
 	"003_shifts.sql":           "5c7a0777009fd1c8a398252fa3dd73bef2e02e8fd63c30bcdf300816e49095e9",
 	"004_sale_corrections.sql": "b00de1c068d7633daed5703a47951e28943783a953263cca5702847260b72c16",
+	"005_sessions.sql":         "4ae9704cc7b7f04e0da00b7b48721f1c2c0b9596d15bfca96b2ac0208fd65db1",
+	"006_sale_requests.sql":    "3a722cfb5101b05da336fc00ccd20c5f9cc7dbbb3b63b2e1c269c6c2cab79232",
 }
 
 func TestReleasedMigrations(t *testing.T) {

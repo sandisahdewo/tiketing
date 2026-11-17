@@ -19,6 +19,8 @@
   // The servers found on this PC's network (null until it has been searched).
   let servers = $state<discover.Server[] | null>(null)
   let searching = $state(false)
+  // The user typed an address, so the search leaves the field alone.
+  let typed = $state(false)
   // The address in the field without its scheme, as the list shows it.
   let chosen = $derived(serverUrl.trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
 
@@ -33,10 +35,15 @@
     if (searching) return
     searching = true
     try {
-      servers = (await App.FindServers()) ?? []
-      // There is only one server: no need to make the user pick it.
+      // The address in the field is asked too: a server that still answers
+      // there is in the list, also when it uses another port.
+      servers = (await App.FindServers(chosen)) ?? []
+      // There is only one server: no need to make the user pick it. It also
+      // replaces a saved address that no server answers on any more (the
+      // server got another address); not one the user typed here.
       const usable = servers.filter((s) => s.compatible)
-      if (!chosen && usable.length === 1) pick(usable[0])
+      const answers = servers.some((s) => s.address === chosen)
+      if (!typed && !answers && usable.length === 1) pick(usable[0])
     } catch {
       servers = []
     } finally {
@@ -188,7 +195,7 @@
         </div>
         <Field label="Alamat server" id="server" {form} name="serverUrl" hint="Terisi saat server dipilih dari daftar. Bisa juga diisi sendiri: alamatnya ada di menu Pengaturan pada komputer Server.">
           <div class="flex gap-2">
-            <input id="server" class="input" placeholder="192.168.1.10:8787" bind:value={serverUrl} />
+            <input id="server" class="input" placeholder="192.168.1.10:8787" bind:value={serverUrl} oninput={() => (typed = serverUrl.trim() !== '')} />
             <button type="button" class="btn btn-secondary shrink-0" onclick={test} disabled={busy}>Tes koneksi</button>
           </div>
         </Field>

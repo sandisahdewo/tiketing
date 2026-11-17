@@ -203,7 +203,7 @@ func (l *Logged) CreateSale(token string, in model.SaleInput) (model.Sale, error
 	c := l.begin(token)
 	out, err := c.svc.CreateSale(token, in)
 	c.log("CreateSale", err, in, "invoice", out.InvoiceNo, "counter", out.Terminal, "items", len(in.Items), "total", money.Format(out.Total), "paid", money.Format(in.Paid),
-		"replaces", in.ReplacesSaleID, "reason", in.Reason)
+		"replaces", in.ReplacesSaleID, "reason", in.Reason, "repeated", out.Repeated)
 	return out, err
 }
 

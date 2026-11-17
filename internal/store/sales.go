@@ -32,12 +32,33 @@ func scanSale(row interface{ Scan(...any) error }) (model.Sale, error) {
 // sale, which userID deletes with reason in the same transaction. While the
 // corrected sale's shift is open the correction goes into it, as a sale of
 // that shift's cashier at its counter: the money changes hands at that drawer.
-func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItemInput, paid, replaces int64, reason string) (model.Sale, error) {
+// CreateSale records a sale. requestID is the number the sending PC gave it
+// ("" for none): when a sale with that number exists already, nothing is
+// recorded and that sale is returned with Repeated set.
+func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItemInput, paid, replaces int64, reason, requestID string) (model.Sale, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return model.Sale{}, err
 	}
 	defer tx.Rollback()
+
+	var request any
+	if requestID != "" {
+		// The same sale sent twice at the same moment: the second one waits
+		// for this transaction and finds the first here.
+		var sentBefore int64
+		err := tx.QueryRow("SELECT id FROM sales WHERE request_id = ?", requestID).Scan(&sentBefore)
+		if err == nil {
+			tx.Rollback()
+			sale, err := s.GetSale(sentBefore)
+			sale.Repeated = true
+			return sale, err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return model.Sale{}, err
+		}
+		request = requestID
+	}
 
 	shift, err := correctedShift(tx, replaces)
 	if err != nil {
@@ -120,9 +141,9 @@ func (s *Store) CreateSale(userID int64, deviceID string, items []model.SaleItem
 		replaced = replaces
 	}
 	res, err := tx.Exec(
-		`INSERT INTO sales (invoice_no, user_id, terminal, counter_id, shift_id, replaces_sale_id, total, paid, change_amount, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		invoice, seller, terminal, counterID, shift.ID, replaced, total, paid, paid-total, now.Format(timeLayout),
+		`INSERT INTO sales (invoice_no, user_id, terminal, counter_id, shift_id, replaces_sale_id, total, paid, change_amount, created_at, request_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		invoice, seller, terminal, counterID, shift.ID, replaced, total, paid, paid-total, now.Format(timeLayout), request,
 	)
 	if err != nil {
 		return model.Sale{}, err
@@ -181,6 +202,16 @@ func nextInvoice(tx *sql.Tx, base string, now time.Time) (string, error) {
 		return "", model.Invalid("Nomor nota hari ini sudah mencapai 9999 untuk kode ini")
 	}
 	return fmt.Sprintf("%s%04d", prefix, seq), nil
+}
+
+// SaleByRequest is the sale that was recorded with the number requestID of
+// the PC that sent it.
+func (s *Store) SaleByRequest(requestID string) (model.Sale, error) {
+	var id int64
+	if err := s.DB.QueryRow("SELECT id FROM sales WHERE request_id = ?", requestID).Scan(&id); err != nil {
+		return model.Sale{}, notFound(err)
+	}
+	return s.GetSale(id)
 }
 
 func (s *Store) GetSale(id int64) (model.Sale, error) {

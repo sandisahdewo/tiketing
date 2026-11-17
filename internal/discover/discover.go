@@ -82,8 +82,9 @@ func hosts(n *net.IPNet) []net.IP {
 
 // Find asks every address of nets for a Tiket server on port and returns the
 // ones that answered, until ctx ends. A server PC that is on two of the
-// networks is listed once.
-func Find(ctx context.Context, nets []*net.IPNet, port int, appVersion string) []Server {
+// networks is listed once. also are addresses (host:port) to ask as well,
+// such as the server this PC was set up with, which may use another port.
+func Find(ctx context.Context, nets []*net.IPNet, port int, appVersion string, also ...string) []Server {
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{
@@ -96,32 +97,35 @@ func Find(ctx context.Context, nets []*net.IPNet, port int, appVersion string) [
 		wg    sync.WaitGroup
 		found []Server
 	)
-	asked := map[string]bool{}
+	addrs := append([]string{}, also...)
 	for _, n := range nets {
 		for _, ip := range hosts(n) {
-			addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
-			if asked[addr] {
-				continue
-			}
-			asked[addr] = true
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				st, ok := ask(ctx, client, addr)
-				if !ok {
-					return
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				found = append(found, Server{
-					Address:    addr,
-					Name:       st.Name,
-					Version:    st.Version,
-					HasUsers:   st.HasUsers,
-					Compatible: version.Compatible(st.Version, appVersion),
-				})
-			}()
+			addrs = append(addrs, net.JoinHostPort(ip.String(), strconv.Itoa(port)))
 		}
+	}
+	asked := map[string]bool{}
+	for _, addr := range addrs {
+		if addr == "" || asked[addr] {
+			continue
+		}
+		asked[addr] = true
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st, ok := ask(ctx, client, addr)
+			if !ok {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			found = append(found, Server{
+				Address:    addr,
+				Name:       st.Name,
+				Version:    st.Version,
+				HasUsers:   st.HasUsers,
+				Compatible: version.Compatible(st.Version, appVersion),
+			})
+		}()
 	}
 	wg.Wait()
 	sort.Slice(found, func(i, j int) bool { return found[i].Address < found[j].Address })

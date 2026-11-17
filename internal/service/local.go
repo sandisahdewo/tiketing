@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"tiket/internal/auth"
@@ -20,6 +21,7 @@ const (
 	maxPageSize     = 500
 	maxNameLength   = 100
 	maxQty          = 10000
+	maxRequestID    = 64
 	maxPrice        = 1_000_000_000_00
 )
 
@@ -72,7 +74,7 @@ type Local struct {
 }
 
 func NewLocal(st *store.Store, version string) *Local {
-	return &Local{Store: st, Sessions: auth.NewSessions(), Version: version}
+	return &Local{Store: st, Sessions: auth.NewSessions(st, time.Now), Version: version}
 }
 
 func (l *Local) user(token string, roles ...string) (model.User, error) {
@@ -82,7 +84,9 @@ func (l *Local) user(token string, roles ...string) (model.User, error) {
 	}
 	u, err := l.Store.GetUser(id)
 	if err == model.ErrNotFound {
-		l.Sessions.Delete(token)
+		if err := l.Sessions.Delete(token); err != nil {
+			return model.User{}, err
+		}
 		return model.User{}, model.ErrUnauthorized
 	}
 	if err != nil {
@@ -140,8 +144,7 @@ func (l *Local) Login(username, password string) (model.Session, error) {
 }
 
 func (l *Local) Logout(token string) error {
-	l.Sessions.Delete(token)
-	return nil
+	return l.Sessions.Delete(token)
 }
 
 func (l *Local) Me(token string) (model.User, error) {
@@ -315,7 +318,9 @@ func (l *Local) SaveUser(token string, in model.UserInput) (model.User, error) {
 			return model.User{}, err
 		}
 		if in.ID != me.ID {
-			l.Sessions.DeleteUser(in.ID)
+			if err := l.Sessions.DeleteUser(in.ID); err != nil {
+				return model.User{}, err
+			}
 		}
 	}
 	return u, nil
@@ -360,14 +365,30 @@ func (l *Local) DeleteUser(token string, id int64) error {
 	if err := l.Store.DeleteUser(id); err != nil {
 		return err
 	}
-	l.Sessions.DeleteUser(id)
-	return nil
+	return l.Sessions.DeleteUser(id)
 }
 
 func (l *Local) CreateSale(token string, in model.SaleInput) (model.Sale, error) {
 	u, err := l.user(token)
 	if err != nil {
 		return model.Sale{}, err
+	}
+	requestID := strings.TrimSpace(in.RequestID)
+	if len(requestID) > maxRequestID {
+		return model.Sale{}, model.Invalid("Nomor permintaan tidak valid")
+	}
+	// Sent before (the answer got lost on the way): report that sale. This
+	// comes first, because what was true then need not be any more: the
+	// sale a correction replaces is already deleted, for one.
+	if requestID != "" {
+		sale, err := l.Store.SaleByRequest(requestID)
+		if err == nil {
+			sale.Repeated = true
+			return sale, nil
+		}
+		if !errors.Is(err, model.ErrNotFound) {
+			return model.Sale{}, err
+		}
 	}
 	merged := map[int64]int64{}
 	var order []int64
@@ -400,7 +421,7 @@ func (l *Local) CreateSale(token string, in model.SaleInput) (model.Sale, error)
 		}
 	}
 	// The server, not the PC, decides the counter: the one assigned to it.
-	return l.Store.CreateSale(u.ID, in.DeviceID, items, in.Paid, in.ReplacesSaleID, reason)
+	return l.Store.CreateSale(u.ID, in.DeviceID, items, in.Paid, in.ReplacesSaleID, reason, requestID)
 }
 
 // saleChange checks that the user may delete or correct a sale, which only an

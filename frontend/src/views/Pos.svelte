@@ -5,6 +5,7 @@
   import LoadingOverlay from '../components/LoadingOverlay.svelte'
   import ShiftReportModal from '../components/ShiftReportModal.svelte'
   import CorrectionModal from '../components/CorrectionModal.svelte'
+  import Modal from '../components/Modal.svelte'
   import Field from '../components/Field.svelte'
   import FormAlert from '../components/FormAlert.svelte'
   import MoneyInput from '../components/MoneyInput.svelte'
@@ -231,6 +232,9 @@
   }
 
   function add(t: model.Ticket) {
+    // A transaction starts: ask the server now, so a login that ended (or a
+    // server that is off) shows here and not when the customer pays.
+    if (cart.length === 0) App.CheckSession().catch(handleError)
     const item = cart.find((c) => c.ticket.id === t.id)
     if (item) item.qty += 1
     else cart.push({ ticket: t, qty: 1 })
@@ -257,6 +261,79 @@
     }
   }
 
+  // The number of the payment being made. The server keeps it with the sale,
+  // so a payment that is sent again is recognised and not recorded twice
+  // unasked.
+  //
+  // A number is used until its outcome is certain: the sale was recorded, or
+  // the cashier decided about one that turned out to be recorded already.
+  // Until then it stays, whatever happens in between: no answer from the
+  // server, an error, the cart emptied, another menu, a new login, the app
+  // closed. It is kept on this PC per user, and the next payment of that
+  // user is sent with it, so the server reports the earlier sale if there is
+  // one.
+  const requestKey = `tiket:sale-request:${session.user?.id ?? 0}`
+
+  function storedRequest(): string {
+    try {
+      return localStorage.getItem(requestKey) ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  let requestId = storedRequest()
+
+  function setRequest(id: string) {
+    requestId = id
+    try {
+      if (id) localStorage.setItem(requestKey, id)
+      else localStorage.removeItem(requestKey)
+    } catch {
+      // Without storage the number still lasts as long as this screen.
+    }
+  }
+
+  // A correction has its own number, for as long as it is being made.
+  let correctionRequest = ''
+  $effect(() => {
+    if (!correction.sale) correctionRequest = ''
+  })
+
+  function newRequestId(): string {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  // The sale the server already has under the number of this payment, and
+  // what was being paid. same says whether it holds what is in the cart now:
+  // an earlier payment may be the one that was recorded.
+  let repeated = $state<{ sale: model.Sale; paid: number; same: boolean } | null>(null)
+
+  function sameAsCart(sale: model.Sale): boolean {
+    if (sale.items.length !== cart.length) return false
+    return cart.every((c) => sale.items.some((it) => it.ticketId === c.ticket.id && it.qty === c.qty))
+  }
+
+  // The cashier looks at the recorded sale; nothing is recorded now.
+  function showRepeated() {
+    if (!repeated) return
+    const id = repeated.sale.id
+    repeated = null
+    setRequest('')
+    cart = []
+    paying = false
+    onshowsale(id)
+  }
+
+  // The cashier wants what is in the cart recorded as a sale of its own.
+  function payAgain() {
+    if (!repeated) return
+    const paid = repeated.paid
+    repeated = null
+    setRequest(newRequestId())
+    pay(paid)
+  }
+
   async function pay(paid: number) {
     // Guards against a second submit before the first sale is saved.
     if (saving) return
@@ -264,7 +341,21 @@
     try {
       const items = cart.map((c) => model.SaleItemInput.createFrom({ ticketId: c.ticket.id, qty: c.qty }))
       const fixing = correction.sale
-      const sale = fixing ? await App.CorrectSale(fixing.id, correction.reason, items, paid) : await App.CreateSale(items, paid)
+      let sale: model.Sale
+      if (fixing) {
+        correctionRequest ||= newRequestId()
+        sale = await App.CorrectSale(fixing.id, correction.reason, items, paid, correctionRequest)
+      } else {
+        if (!requestId) setRequest(newRequestId())
+        sale = await App.CreateSale(items, paid, requestId)
+        // Recorded before under this number: the cashier is asked. (A
+        // correction sent twice is simply done; it cannot be made twice.)
+        if (sale.repeated) {
+          repeated = { sale, paid, same: sameAsCart(sale) }
+          return
+        }
+        setRequest('')
+      }
       if (fixing) {
         toast(`Nota ${fixing.invoiceNo} diganti ${sale.invoiceNo}`)
         endCorrection()
@@ -532,6 +623,48 @@
 
 {#if paying}
   <PaymentModal {total} busy={saving} onpay={pay} onclose={() => (paying = false)} />
+{/if}
+
+{#if repeated}
+  {@const s = repeated.sale}
+  <Modal title={repeated.same ? 'Transaksi ini sudah tercatat' : 'Pembayaran sebelumnya sudah tercatat'} closable={false} width="max-w-lg">
+    <p role="alert">
+      {#if repeated.same}
+        Server sudah menyimpan transaksi ini sebagai nota <b>{s.invoiceNo}</b> pada {formatDateTime(s.createdAt)}{s.deletedAt ? ' (nota itu sudah dihapus)' : ''}:
+      {:else}
+        Pembayaran sebelumnya di komputer ini, yang hasilnya waktu itu tidak diketahui, ternyata sudah tersimpan sebagai nota
+        <b>{s.invoiceNo}</b> pada {formatDateTime(s.createdAt)}{s.deletedAt ? ' (nota itu sudah dihapus)' : ''}:
+      {/if}
+    </p>
+    <ul class="mt-3 divide-y divide-slate-200 rounded-md border border-slate-200 text-sm">
+      {#each s.items as it (it.id)}
+        <li class="flex justify-between gap-3 px-3 py-2">
+          <span>{it.ticketName} × {it.qty}</span>
+          <span class="tabular-nums">{formatRp(it.subtotal)}</span>
+        </li>
+      {/each}
+      <li class="flex justify-between gap-3 px-3 py-2 font-semibold">
+        <span>Total · {s.cashierName}</span>
+        <span class="tabular-nums">{formatRp(s.total)}</span>
+      </li>
+    </ul>
+    {#if repeated.same}
+      <p class="mt-3 text-sm text-slate-600">
+        Biasanya ini terjadi karena jawaban server tidak sampai ke komputer ini saat pembayaran pertama. Kalau diproses lagi, pembelian ini
+        tercatat sebagai <b>dua nota</b>.
+      </p>
+    {:else}
+      <p class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        Isinya <b>berbeda</b> dari keranjang sekarang. Kalau keranjang sekarang adalah pembelian lain, lanjutkan. Kalau ini pembelian yang
+        sama dengan isi yang diubah, nota itu sudah menghitung sebagian isinya: minta admin mengoreksi nota itu, jangan diproses lagi.
+      </p>
+    {/if}
+    {#snippet footer()}
+      <button class="btn btn-secondary" onclick={() => (repeated = null)}>Batal</button>
+      <button class="btn btn-secondary" onclick={payAgain}>{repeated?.same ? 'Proses sebagai transaksi baru' : 'Lanjutkan transaksi ini'}</button>
+      <button class="btn btn-primary" onclick={showRepeated}>Lihat di riwayat</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if lastSaleId !== null}

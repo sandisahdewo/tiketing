@@ -94,7 +94,11 @@ Uji mode client di satu PC: jalankan instance kedua dengan folder data lain, mis
 
 Mode Server/Client diubah oleh admin lewat menu Pengaturan. Tanpa login, *Ubah mode* hanya muncul selama PC belum dipakai: aplikasi gagal menyala, client tidak bisa terhubung ke server, atau server belum punya pengguna.
 
-PC server harus menyala selama client dipakai. Sesi login tersimpan di memori server, jadi setelah server di-restart, semua kasir perlu login ulang.
+PC server harus menyala dan aplikasinya terbuka selama client dipakai: selama aplikasi server tertutup, client tidak bisa bertransaksi. Di PC server yang juga dipakai kasir, cukup logout, jangan menutup aplikasinya.
+
+Kalau koneksi putus tepat saat pembayaran, penjualannya bisa saja sudah tersimpan di server tanpa client mengetahuinya. Saat kasir membayar lagi, aplikasi menampilkan nota yang sudah tercatat itu dan bertanya: lihat di riwayat, atau proses sebagai transaksi baru.
+
+Sesi login berlaku 24 jam sejak terakhir dipakai dan tersimpan di database server, jadi kasir di client tetap login setelah aplikasi server dibuka ulang. Menutup aplikasi di sebuah PC mengeluarkan login PC itu saja.
 
 ## Rilis & update otomatis
 
